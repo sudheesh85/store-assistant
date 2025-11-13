@@ -8,6 +8,8 @@ export interface ChatMessage {
   data?: {
     columns: string[];
     rows: any[][];
+    total_rows?: number;
+    showing_preview?: boolean;
   };
   visualization?: 'bar' | 'line' | 'pie' | 'table';
   error?: string;
@@ -29,6 +31,8 @@ export interface APIResponse {
   data?: {
     columns: string[];
     rows: any[][];
+    total_rows?: number;
+    showing_preview?: boolean;
   };
   visualization?: 'bar' | 'line' | 'pie' | 'table';
   error?: string;

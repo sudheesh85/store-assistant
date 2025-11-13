@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # Query limits
     MAX_ROWS: int = Field(default=1000, ge=1)
+    PREVIEW_ROWS: int = Field(default=5, ge=1, le=100)  # Rows to show in UI
     QUERY_TIMEOUT: int = Field(default=30, ge=1)
 
     # Feature toggles

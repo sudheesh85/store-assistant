@@ -141,6 +141,15 @@ export default function ChatMessage({ message }: ChatMessageProps) {
               {/* Data Visualization */}
               {message.data && !message.error && (
                 <div className="mt-4">
+                  {/* Preview Notice */}
+                  {message.data.showing_preview && (
+                    <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        📊 Showing first {message.data.rows.length} of {message.data.total_rows} rows. 
+                        <span className="font-medium"> Use "Download CSV" button to get full data.</span>
+                      </p>
+                    </div>
+                  )}
                   <DataVisualization
                     data={message.data}
                     visualization={message.visualization}

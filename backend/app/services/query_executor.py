@@ -39,6 +39,7 @@ class QueryExecutorService:
             "rows": rows,
             "returned_rows": len(rows),
             "truncated": truncated,
+            "has_more": len(rows) > settings.PREVIEW_ROWS,
         }
 
     # ------------------------------------------------------------------

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import APIRouter
@@ -10,8 +9,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.settings import settings
-from app.services.dataset_manager import DatasetMetadata, dataset_manager
+from app.services.dataset_manager import dataset_manager
 from app.services.explanation import default_explanation_service
+from app.services.insights_generator import insights_generator
+from app.services.intent_classifier import intent_classifier
 from app.services.query_executor import query_executor
 from app.services.sql_generator import sql_generator
 from app.services.visualization import default_visualizer
@@ -23,6 +24,8 @@ router = APIRouter(prefix="/ask", tags=["Ask"])
 class AskDataModel(BaseModel):
     columns: List[str]
     rows: List[List[Any]]
+    total_rows: int
+    showing_preview: bool = False
 
 
 class AskRequestModel(BaseModel):
@@ -42,33 +45,8 @@ class AskResponseModel(BaseModel):
     error: Optional[str] = None
 
 
-def _parse_timestamp(value: str) -> datetime:
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:
-        return datetime.min
-
-
 def _resolve_store_id(store_id: Optional[str]) -> str:
     return store_id or settings.DEFAULT_STORE_ID
-
-
-def _resolve_dataset(
-    store_id: str, dataset_type: Optional[str]
-) -> Optional[DatasetMetadata]:
-    if dataset_type:
-        try:
-            return dataset_manager.get_dataset(store_id, dataset_type)
-        except KeyError:
-            logger.warning("Dataset %s not found for store %s", dataset_type, store_id)
-            return None
-
-    datasets = dataset_manager.list_datasets(store_id)
-    if not datasets:
-        return None
-
-    # Pick the most recently uploaded dataset as a sensible default.
-    return max(datasets, key=lambda ds: _parse_timestamp(ds.uploaded_at))
 
 
 def _map_visualization(suggestion: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -89,15 +67,44 @@ def _map_visualization(suggestion: Optional[Dict[str, Any]]) -> Optional[str]:
 
 def _process_question(payload: AskRequestModel) -> AskResponseModel:
     store_id = _resolve_store_id(payload.store_id)
-    dataset = _resolve_dataset(store_id, payload.dataset_type)
-    if dataset is None:
+    
+    # Get ALL available datasets
+    datasets = dataset_manager.list_datasets(store_id)
+    
+    if not datasets:
         return AskResponseModel(
             success=False,
             response="",
             error="No datasets available. Please upload a CSV before asking questions.",
         )
 
-    sql_query, generation_error = sql_generator.generate_sql(payload.question, dataset)
+    # Classify intent: data query vs insight/recommendation request
+    intent = intent_classifier.classify(payload.question)
+    
+    logger.info(
+        "Processing question: '%s' | Intent: %s | Available datasets: %s",
+        payload.question,
+        intent,
+        [ds.dataset_type for ds in datasets],
+    )
+
+    # Handle insight/recommendation requests (no SQL needed)
+    if intent == "insight":
+        insight_response = insights_generator.generate(
+            payload.question,
+            store_id,
+            context_data=None,  # TODO: Add session context
+        )
+        return AskResponseModel(
+            success=True,
+            response=insight_response,
+            sql=None,
+            data=None,
+            visualization=None,
+        )
+
+    # Handle data queries (generate and execute SQL)
+    sql_query, generation_error = sql_generator.generate_sql(payload.question, datasets)
     if generation_error or not sql_query:
         return AskResponseModel(
             success=False,
@@ -123,7 +130,18 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
             error="Failed to execute query.",
         )
 
-    data_payload = AskDataModel(columns=execution["columns"], rows=execution["rows"])
+    # Limit to preview rows for UI, but keep full data available for download
+    all_rows = execution["rows"]
+    total_rows = len(all_rows)
+    preview_rows = all_rows[:settings.PREVIEW_ROWS]
+    showing_preview = total_rows > settings.PREVIEW_ROWS
+    
+    data_payload = AskDataModel(
+        columns=execution["columns"],
+        rows=preview_rows,
+        total_rows=total_rows,
+        showing_preview=showing_preview,
+    )
 
     explanation_text = "Query executed successfully."
     if settings.ENABLE_RESULT_EXPLANATION:

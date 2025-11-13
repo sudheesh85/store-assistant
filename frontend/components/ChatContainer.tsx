@@ -20,6 +20,9 @@ export default function ChatContainer() {
   const [isUploadingDataset, setIsUploadingDataset] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // Dataset type is no longer used - LLM automatically selects the right table
+  // Keeping this state for backward compatibility but not showing it in UI
+  const [selectedDatasetType] = useState<string>('auto');
   const defaultStoreId =
     process.env.NEXT_PUBLIC_STORE_ID || 'demo-store';
   const defaultDatasetType =
@@ -80,7 +83,7 @@ export default function ChatContainer() {
         question: content,
         session_id: sessionId,
         store_id: defaultStoreId,
-        dataset_type: defaultDatasetType,
+        // dataset_type is NOT sent - LLM will analyze question and choose the right table automatically
       };
 
       if (!Number.isNaN(defaultOrgId)) {
@@ -199,7 +202,7 @@ export default function ChatContainer() {
     try {
       const dataset = await apiClient.uploadDataset(
         file,
-        defaultDatasetType,
+        selectedDatasetType,
         {
           name: file.name.replace(/\.[^/.]+$/, ''),
           storeId: defaultStoreId,
@@ -244,10 +247,10 @@ export default function ChatContainer() {
         <aside className="hidden md:flex w-72 flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950">
           <div className="px-4 py-5 border-b border-gray-200 dark:border-gray-800">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Data ready
+              🤖 AI Store Assistant
             </h2>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Upload the latest POS/ERP CSV to refresh store insights.
+              Ask any question in Malayalam or English. AI automatically analyzes all your uploaded data and finds the answer.
             </p>
           </div>
           <div className="px-4 py-4 space-y-3">
@@ -293,7 +296,7 @@ export default function ChatContainer() {
                   Store Assistant
                 </h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  AI assistant for Kerala SMB stores
+                  🤖 <span className="font-semibold text-primary-600 dark:text-primary-400">AI Automatically Selects the Right Data</span>
                 </p>
               </div>
               <div className="flex items-center gap-2">

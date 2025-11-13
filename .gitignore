@@ -29,6 +29,7 @@
 *.db
 *.sqlite
 *.log
+*.pyc
 
 # debug
 npm-debug.log*
