@@ -1,0 +1,24 @@
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { authService } from '@/lib/auth';
+import LoginForm from '@/components/LoginForm';
+
+export default function LoginPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Redirect if already authenticated
+    if (authService.isAuthenticated()) {
+      router.push('/');
+    }
+  }, [router]);
+
+  const handleLoginSuccess = () => {
+    router.push('/');
+  };
+
+  return <LoginForm onLoginSuccess={handleLoginSuccess} />;
+}
+
