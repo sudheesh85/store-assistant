@@ -127,6 +127,9 @@ class DatasetManager:
             table_name,
             row_count,
         )
+        
+        # For now, use replace mode (original behavior)
+        # TODO: Enable append mode with metadata columns in future version
         with engine.begin() as connection:
             sanitized_df.to_sql(table_name, connection, if_exists="replace", index=False)
 

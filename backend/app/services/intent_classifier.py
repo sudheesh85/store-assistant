@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 try:
     from openai import OpenAI
@@ -14,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class IntentClassifier:
-    """Classify user question intent: data query vs insight/recommendation request."""
+    """Classify user query intent using LLM."""
 
     def __init__(self) -> None:
         if not settings.OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY missing – intent classification will use fallback.")
+            logger.warning("OPENAI_API_KEY missing – intent classification will default to 'data_query'.")
             self.client = None
         elif OpenAI is None:
-            logger.warning("openai package not installed – intent classification disabled.")
+            logger.warning("openai package not installed – intent classification will default to 'data_query'.")
             self.client = None
         else:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -33,25 +32,28 @@ class IntentClassifier:
         Returns:
             "data_query" - needs SQL execution (e.g., "show sales", "top products")
             "insight" - needs analysis/recommendations (e.g., "how to improve", "what should I do")
+            "reformat" - wants to reformat previous answer (e.g., "in malayalam", "translate", "explain")
         """
         if not self.client:
-            return self._fallback_classify(question)
+            return "data_query"
 
-        try:
-            context_note = " User has previous query results visible." if has_context else ""
-            
-            prompt = f"""Classify this question intent:{context_note}
+        context_note = " (User has conversation context - might be follow-up question)" if has_context else ""
+
+        prompt = f"""Classify this question intent:{context_note}
 
 QUESTION: {question}
 
 Is this a:
-A) DATA QUERY - user wants to see/fetch data (show, list, get, how many, what are, top, total)
-B) INSIGHT/ADVICE - user wants recommendations/analysis (how to improve, what should I do, suggestions, advice, why)
+A) DATA QUERY - user wants to see/fetch NEW data (show, list, get, how many, what are, top, total, who is, which)
+B) INSIGHT/ADVICE - user wants recommendations/analysis (how to improve, what should I do, suggestions, advice, why, strategy)
+C) REFORMAT - user wants previous answer reformatted/translated (in malayalam, translate, explain, tell me in, give me in, can you give)
 
 Respond with ONLY ONE WORD:
-- "data_query" (if asking for data)
-- "insight" (if asking for recommendations/analysis)"""
+- "data_query" (if asking for NEW data or specific information)
+- "insight" (if asking for recommendations/analysis/strategy)
+- "reformat" (if asking to translate/reformat previous answer)"""
 
+        try:
             response = self.client.chat.completions.create(
                 model=settings.OPENAI_MODEL,
                 temperature=0.0,
@@ -64,30 +66,19 @@ Respond with ONLY ONE WORD:
 
             intent = response.choices[0].message.content.strip().lower() if response.choices else "data_query"
             
-            logger.info("Intent classification for '%s': %s", question, intent)
+            logger.info("Classified intent for '%s': %s", question[:50], intent)
             
-            return intent if intent in ["data_query", "insight"] else "data_query"
+            # Validate intent
+            return intent if intent in ["data_query", "insight", "reformat"] else "data_query"
 
         except Exception as exc:
             logger.error("Intent classification failed: %s", exc)
-            return self._fallback_classify(question)
-
-    def _fallback_classify(self, question: str) -> str:
-        """Simple keyword-based fallback."""
-        q = question.lower()
-        
-        insight_keywords = [
-            "how to", "how can", "what should", "improve", "increase", "decrease",
-            "suggest", "recommend", "advice", "why", "strategy", "better", "optimize"
-        ]
-        
-        if any(keyword in q for keyword in insight_keywords):
-            return "insight"
-        
-        return "data_query"
+            return "data_query"
 
 
 intent_classifier = IntentClassifier()
-
 __all__ = ["intent_classifier", "IntentClassifier"]
+
+
+
 

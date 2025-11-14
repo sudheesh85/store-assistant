@@ -28,10 +28,15 @@ class SQLGeneratorService:
         else:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-    def generate_sql(self, question: str, datasets: List[DatasetMetadata]) -> tuple[str | None, str | None]:
+    def generate_sql(
+        self, 
+        question: str, 
+        datasets: List[DatasetMetadata],
+        conversation_context: Optional[List[str]] = None
+    ) -> tuple[str | None, str | None]:
         """
         Generate SQL by showing LLM ALL available datasets and letting it choose the best one.
-        The LLM will analyze the question, look at all schemas, and pick the right table.
+        Uses conversation context to understand follow-up questions.
         """
         if not datasets:
             return None, "No datasets available"
@@ -40,12 +45,15 @@ class SQLGeneratorService:
         all_schemas = self._build_multi_schema_prompt(datasets)
         
         system_prompt = (
-            "You are an expert Kerala retail analytics assistant. "
-            "Generate safe, efficient SQL queries for a SQLite database. "
-            "The user question may be Malayalam, Manglish, or English. "
-            "You have access to multiple tables - analyze the question and choose the most appropriate table."
+            "You are an expert SQL query generator for retail analytics. "
+            "Generate ONLY valid SQLite SELECT queries - no explanations, no comments, no markdown. "
+            "CRITICAL: Your response must start with SELECT or WITH. "
+            "The user question may be in Malayalam, Manglish, or English. "
+            "You have access to multiple tables - analyze the question and choose the most appropriate table(s). "
+            "Use conversation context to understand follow-up questions with pronouns (they/them/those). "
+            "If a follow-up asks 'who are they' after 'how many employees', list the employees."
         )
-        user_prompt = self._build_multi_table_prompt(question, all_schemas)
+        user_prompt = self._build_multi_table_prompt(question, all_schemas, conversation_context)
 
         logger.info(
             "Generating SQL for question: '%s' | Available datasets: %s",
@@ -54,7 +62,8 @@ class SQLGeneratorService:
         )
 
         if not self.client:
-            return None, "OPENAI_API_KEY is not configured"
+            # Demo mode - provide helpful message
+            return None, "⚠️ Demo Mode: AI SQL generation requires OpenAI API key. To enable full features, add your OpenAI API key in Settings."
 
         try:
             response = self.client.chat.completions.create(
@@ -78,6 +87,8 @@ class SQLGeneratorService:
                 question,
             )
             return None, "Unable to parse SQL from model output"
+        
+        logger.info("Generated SQL: %s", sql_query)
 
         # Validate against ALL available tables
         validation_error = self._validate_sql_multi_table(sql_query, datasets)
@@ -123,28 +134,52 @@ class SQLGeneratorService:
         }
         return purposes.get(dataset_type.lower(), "Store data")
     
-    def _build_multi_table_prompt(self, question: str, all_schemas: str) -> str:
+    def _build_multi_table_prompt(
+        self, 
+        question: str, 
+        all_schemas: str,
+        conversation_context: Optional[List[str]] = None
+    ) -> str:
         """Build prompt showing ALL available tables and asking LLM to choose."""
+        
+        context_section = ""
+        if conversation_context and len(conversation_context) > 0:
+            context_section = f"""
+⚠️ CONVERSATION CONTEXT (Previous questions in this conversation):
+{chr(10).join(f"{i+1}. {q}" for i, q in enumerate(conversation_context))}
+
+🔑 IMPORTANT: Use this context to understand follow-up questions with pronouns:
+- If previous question asked "how many employees" and current is "who are they", 
+  → Generate a query to list all employees (SELECT * FROM staff_raw)
+- If previous was "total sales" and current is "show them", 
+  → Generate query to list sales records
+- If previous was "who is the best salesperson" and current is "who is the weakest",
+  → Generate similar query but ORDER BY ASC instead of DESC or MIN instead of MAX
+- Pronouns like "they/them/those/these" refer to entities from the previous question
+
+"""
+        
         rules = f"""You have access to MULTIPLE tables in the database. Analyze the question and choose the MOST APPROPRIATE table(s).
 
 AVAILABLE TABLES:
 {all_schemas}
-
+{context_section}
 RULES:
 1. **Analyze the question carefully** - understand what data is needed
-2. **Choose the table(s)** that best answer the question
-3. **You can use JOINs** if the question requires data from multiple tables
+2. **Use conversation context** to understand pronouns and follow-up questions
+3. **Choose the table(s)** that best answer the question
+4. **You can use JOINs** if the question requires data from multiple tables
    - Use common columns like `staff_id`, `sku`, `store_id` to JOIN tables
    - Example: To find staff with most sales, JOIN staff_raw with sales_raw ON staff_id
-4. Use exact table names shown above
-5. Return a single SELECT or WITH query. No DML/DDL, no comments, no semicolons
-6. For counts use `COUNT(*)` or `COUNT(DISTINCT column)` as appropriate
-7. For lists, include `ORDER BY` and apply `LIMIT` if appropriate (default {min(settings.MAX_ROWS, 100)})
-8. For rankings/best/top, use `GROUP BY` with `ORDER BY` and `LIMIT`
-9. Alias grouped results as `category` and numeric aggregations as `value` when appropriate
-10. For date/time trends, alias columns as `date` and `value`
-11. Ensure all column names exist exactly as shown in the schema
-12. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
+5. Use exact table names shown above
+6. Return a single SELECT or WITH query. No DML/DDL, no comments, no semicolons
+7. For counts use `COUNT(*)` or `COUNT(DISTINCT column)` as appropriate
+8. For lists, include `ORDER BY` and apply `LIMIT` if appropriate (default {min(settings.MAX_ROWS, 100)})
+9. For rankings/best/top, use `GROUP BY` with `ORDER BY` and `LIMIT`
+10. Alias grouped results as `category` and numeric aggregations as `value` when appropriate
+11. For date/time trends, alias columns as `date` and `value`
+12. Ensure all column names exist exactly as shown in the schema
+13. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
 
 USER QUESTION: {question}
 
@@ -188,19 +223,46 @@ Respond with ONLY the SQL query (no explanations, no markdown, just the SQL)."""
     def _extract_sql(self, llm_output: str) -> Optional[str]:
         if not llm_output:
             return None
+        
+        # Log the raw output for debugging
+        logger.debug("Raw LLM output for SQL extraction: %s", llm_output[:200])
+        
+        # Try multiple extraction strategies
+        
+        # 1. Try to extract from SQL code fence
         fenced = re.search(r"```sql\s*([\s\S]*?)```", llm_output, flags=re.IGNORECASE)
         if fenced:
             candidate = fenced.group(1).strip()
+        # 2. Try generic code fence (might have no language tag)
+        elif re.search(r"```\s*(SELECT|WITH)\b", llm_output, flags=re.IGNORECASE):
+            generic_fence = re.search(r"```\s*([\s\S]*?)```", llm_output, flags=re.IGNORECASE)
+            if generic_fence:
+                candidate = generic_fence.group(1).strip()
+            else:
+                candidate = None
+        # 3. Try to find SELECT/WITH anywhere in the output
         else:
             match = re.search(r"\b(SELECT|WITH)\b[\s\S]*", llm_output, flags=re.IGNORECASE)
             candidate = match.group(0).strip() if match else None
+        
         if not candidate:
-            return None
+            # 4. Last resort: check if the entire output looks like SQL
+            if llm_output.strip().upper().startswith(("SELECT", "WITH")):
+                candidate = llm_output.strip()
+            else:
+                logger.warning("Could not extract SQL from output: %s", llm_output[:100])
+                return None
+        
+        # Clean up the candidate
         # Remove trailing comments or markdown
         candidate = re.sub(r"```.*", "", candidate, flags=re.DOTALL)
+        # Remove semicolons
         candidate = candidate.split(";", 1)[0]
+        # Remove inline SQL comments
+        candidate = re.sub(r"--[^\n]*", "", candidate)
         candidate = candidate.strip()
-        return candidate if candidate else None
+        
+        return candidate if candidate and len(candidate) > 10 else None
 
     def _validate_sql_multi_table(self, sql_query: str, datasets: List[DatasetMetadata]) -> Optional[str]:
         """Validate SQL against ALL available tables. Allows JOINs."""

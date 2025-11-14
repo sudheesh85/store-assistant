@@ -33,9 +33,82 @@ class VisualizationService:
 
         num_cols = len(columns)
         num_rows = len(rows)
+        question_lower = question.lower()
 
-        # Basic checks - never chart these
-        if num_cols > 3 or num_rows == 0:
+        # ========================================
+        # STRICT RULES: NO CHART for these cases
+        # ========================================
+        
+        # 1. Too many columns = detailed data view
+        if num_cols > 2:
+            logger.info("No chart: Too many columns (%d > 2)", num_cols)
+            return None
+        
+        # 2. No data
+        if num_rows == 0:
+            return None
+        
+        # ========================================
+        # CHECK FOR CHART TRIGGERS FIRST (priority)
+        # ========================================
+        # - Aggregated metrics (top N, total, count, sum, average)
+        # - Time series (trends over time)
+        # - Comparisons (highest, lowest, best, worst)
+        
+        chart_trigger_keywords = [
+            'top ', 'bottom ', 'highest', 'lowest', 'best', 'worst',
+            'most', 'least', 'total', 'sum', 'average', 'count',
+            'trend', 'over time', 'by month', 'by day', 'by year',
+            'compare', 'comparison', 'growth', 'change'
+        ]
+        should_consider_chart = any(keyword in question_lower for keyword in chart_trigger_keywords)
+        
+        # If chart trigger found, skip list checks (trend/aggregation questions take priority)
+        if should_consider_chart:
+            # Only block if columns contain TEXT data (names, emails, IDs, etc.)
+            text_column_indicators = ['name', 'email', 'phone', 'id', 'address', 'description', 'status', 'role']
+            has_text_columns = any(
+                any(indicator in col.lower() for indicator in text_column_indicators)
+                for col in columns
+            )
+            if has_text_columns:
+                logger.info("No chart: Data contains text columns (names, emails, etc.)")
+                return None
+            # Proceed to LLM/fallback for chart generation
+        else:
+            # No chart trigger found - apply strict blocking rules
+            
+            # 3. Questions asking about SPECIFIC people/entities (who is X, what is Y)
+            specific_entity_patterns = [
+                'who is', 'who are', 'what is', 'which is',
+                'tell me about', 'show me about', 'details of',
+                'information about', 'info about'
+            ]
+            if any(pattern in question_lower for pattern in specific_entity_patterns):
+                logger.info("No chart: Question asks about specific entity")
+                return None
+            
+            # 4. Questions asking for LISTS or ALL items
+            list_keywords = [
+                'list', 'show all', 'display all',
+                'all staff', 'all products', 'all items', 'all sales',
+            ]
+            if any(keyword in question_lower for keyword in list_keywords):
+                logger.info("No chart: Question asks for list/details")
+                return None
+            
+            # 5. Check if columns contain TEXT data (names, emails, IDs, etc.)
+            text_column_indicators = ['name', 'email', 'phone', 'id', 'address', 'description', 'status', 'role']
+            has_text_columns = any(
+                any(indicator in col.lower() for indicator in text_column_indicators)
+                for col in columns
+            )
+            if has_text_columns:
+                logger.info("No chart: Data contains text columns (names, emails, etc.)")
+                return None
+            
+            # No clear chart trigger and no blocking rules matched
+            logger.info("No chart: Question doesn't ask for aggregated/comparative data")
             return None
 
         # Use LLM to decide
@@ -57,28 +130,26 @@ class VisualizationService:
         sample_data = rows[:3]  # First 3 rows
         data_summary = f"Columns: {', '.join(columns)}\nRows: {num_rows}\nSample: {sample_data}"
         
-        prompt = f"""Analyze this question and data to decide if a chart/visualization is appropriate.
+        prompt = f"""Does this question ask for AGGREGATED/COMPARATIVE data that NEEDS a chart?
 
-QUESTION: {question}
+QUESTION: "{question}"
+DATA: {num_cols} columns, {num_rows} rows
+COLUMNS: {', '.join(columns)}
 
-DATA:
-{data_summary}
+⚠️ DEFAULT: "none" (NO CHART)
 
-RULES:
-1. If user asks for a LIST (list, show, display, pls, who, details, all) → NO CHART (return "none")
-2. If data has many text columns (names, emails, etc.) → NO CHART
-3. If user asks for comparison/ranking (top, best, highest) → BAR CHART
-4. If user asks for single total/count (total, sum, count) → METRIC
-5. If user asks for trend (over time, daily, monthly) → LINE CHART
-6. If data has dates in first column + numbers → LINE CHART
-7. Default for unclear cases → NO CHART
+❌ MUST RETURN "none" IF:
+- Asking about specific person/entity (who is X, what is Y)
+- Wants to see details/records
+- Text/categorical data (names, IDs, statuses)
+- More than 2 columns
 
-Respond with ONLY ONE WORD:
-- "none" (no chart, show table)
-- "bar" (bar chart for comparisons)
-- "line" (line chart for trends)
-- "metric" (single number display)
-- "pie" (distribution/percentage)"""
+✅ ONLY return chart type IF:
+- "top N" / "highest" / "lowest" / "best" / "worst" → "bar"
+- "trend" / "over time" / "by month" → "line"
+- "total" / "count" / "sum" (SINGLE NUMBER) → "metric"
+
+Respond with ONE WORD ONLY: none / bar / line / metric"""
 
         try:
             response = self.client.chat.completions.create(

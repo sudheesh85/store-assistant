@@ -1,7 +1,7 @@
 'use client';
 
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Download, FileSpreadsheet } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useState } from 'react';
 
 interface DataVisualizationProps {
@@ -26,18 +26,12 @@ export default function DataVisualization({ data, visualization }: DataVisualiza
     return obj;
   });
 
-  // Auto-detect best visualization if not specified
+  // Use visualization type from backend, default to 'table' if not specified
   const getVisualizationType = (): 'bar' | 'line' | 'pie' | 'table' => {
     if (visualization) return visualization;
     
-    // Default to table for small datasets, bar chart for larger ones
-    if (data.rows.length <= 5 && data.columns.length === 2) {
-      return 'pie';
-    }
-    if (data.rows.length > 20) {
-      return 'table';
-    }
-    return 'bar';
+    // If backend explicitly says no visualization (null/undefined), show ONLY table
+    return 'table';
   };
 
   const visType = getVisualizationType();
@@ -76,12 +70,15 @@ export default function DataVisualization({ data, visualization }: DataVisualiza
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Results</h3>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowTable(!showTable)}
-            className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-          >
-            {showTable ? 'Hide' : 'Show'} Table
-          </button>
+          {/* Only show table toggle if there's a chart */}
+          {visType !== 'table' && (
+            <button
+              onClick={() => setShowTable(!showTable)}
+              className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              {showTable ? 'Hide Table' : 'Show Table'}
+            </button>
+          )}
           <button
             onClick={exportToCSV}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
@@ -162,8 +159,8 @@ export default function DataVisualization({ data, visualization }: DataVisualiza
         </div>
       )}
 
-      {/* Table View */}
-      {showTable && (
+      {/* Table View - Always show when visType is 'table', otherwise respect showTable state */}
+      {(visType === 'table' || showTable) && (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-800">

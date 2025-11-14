@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/lib/auth';
-import LoginForm from '@/components/LoginForm';
+import OnboardingFlow from '@/components/OnboardingFlow';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,10 +15,10 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const handleLoginSuccess = () => {
+  const handleOnboardingComplete = () => {
     router.push('/');
   };
 
-  return <LoginForm onLoginSuccess={handleLoginSuccess} />;
+  return <OnboardingFlow onComplete={handleOnboardingComplete} />;
 }
 

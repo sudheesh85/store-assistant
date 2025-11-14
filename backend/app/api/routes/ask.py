@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict, deque
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import APIRouter
@@ -19,6 +20,12 @@ from app.services.visualization import default_visualizer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ask", tags=["Ask"])
+
+# Simple in-memory session history (stores last 5 questions per session)
+session_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=5))
+
+# Store recent query results (for context in follow-up questions)
+session_results: Dict[str, Optional[Dict[str, Any]]] = defaultdict(lambda: None)
 
 
 class AskDataModel(BaseModel):
@@ -67,6 +74,7 @@ def _map_visualization(suggestion: Optional[Dict[str, Any]]) -> Optional[str]:
 
 def _process_question(payload: AskRequestModel) -> AskResponseModel:
     store_id = _resolve_store_id(payload.store_id)
+    session_id = payload.session_id or "default"
     
     # Get ALL available datasets
     datasets = dataset_manager.list_datasets(store_id)
@@ -78,23 +86,40 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
             error="No datasets available. Please upload a CSV before asking questions.",
         )
 
-    # Classify intent: data query vs insight/recommendation request
-    intent = intent_classifier.classify(payload.question)
+    # Get conversation context for this session
+    context_questions = list(session_history[session_id])
+    
+    # Classify intent: data query vs insight/recommendation vs reformat request
+    has_context = len(context_questions) > 0
+    intent = intent_classifier.classify(payload.question, has_context=has_context)
     
     logger.info(
-        "Processing question: '%s' | Intent: %s | Available datasets: %s",
+        "Processing question: '%s' | Intent: %s | Context: %d previous questions",
         payload.question,
         intent,
-        [ds.dataset_type for ds in datasets],
+        len(context_questions),
     )
 
     # Handle insight/recommendation requests (no SQL needed)
     if intent == "insight":
+        # Pass conversation context to understand follow-up questions
+        full_question = payload.question
+        previous_result = None
+        
+        if context_questions:
+            # If follow-up question with pronouns (he/she/it), add context
+            if any(word in payload.question.lower() for word in ['he', 'she', 'his', 'her', 'their', 'them']):
+                full_question = f"Previous question: {context_questions[-1]}. Current question: {payload.question}"
+                # Get the previous query result (if any) to extract entity names
+                previous_result = session_results.get(session_id)
+        
         insight_response = insights_generator.generate(
-            payload.question,
+            full_question,
             store_id,
-            context_data=None,  # TODO: Add session context
+            context_data=previous_result,
         )
+        # Store in history
+        session_history[session_id].append(payload.question)
         return AskResponseModel(
             success=True,
             response=insight_response,
@@ -102,9 +127,30 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
             data=None,
             visualization=None,
         )
+    
+    # Handle reformat requests (translate/explain previous answer)
+    if intent == "reformat":
+        # Generate a response based on the question (e.g., "give in malayalam")
+        reformat_response = insights_generator.generate(
+            f"Previous context: {', '.join(context_questions[-2:])}. Current request: {payload.question}",
+            store_id,
+            context_data=None,
+        )
+        session_history[session_id].append(payload.question)
+        return AskResponseModel(
+            success=True,
+            response=reformat_response,
+            sql=None,
+            data=None,
+            visualization=None,
+        )
 
-    # Handle data queries (generate and execute SQL)
-    sql_query, generation_error = sql_generator.generate_sql(payload.question, datasets)
+    # Handle data queries (generate and execute SQL) - pass context!
+    sql_query, generation_error = sql_generator.generate_sql(
+        payload.question, 
+        datasets,
+        conversation_context=context_questions
+    )
     if generation_error or not sql_query:
         return AskResponseModel(
             success=False,
@@ -133,6 +179,7 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
     # Limit to preview rows for UI, but keep full data available for download
     all_rows = execution["rows"]
     total_rows = len(all_rows)
+    logger.info("Query returned %d rows", total_rows)
     preview_rows = all_rows[:settings.PREVIEW_ROWS]
     showing_preview = total_rows > settings.PREVIEW_ROWS
     
@@ -168,6 +215,15 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
         except Exception as exc:
             logger.warning("Visualization suggestion failed: %s", exc)
 
+    # Store question in session history for context
+    session_history[session_id].append(payload.question)
+    
+    # Store query result for follow-up questions (store full result for context extraction)
+    session_results[session_id] = {
+        "columns": execution["columns"],
+        "rows": execution["rows"],  # Store full rows, not just preview
+    }
+    
     return AskResponseModel(
         success=True,
         response=explanation_text,

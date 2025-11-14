@@ -29,7 +29,14 @@
 *.db
 *.sqlite
 *.log
+
+# Python
 *.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
 
 # debug
 npm-debug.log*
