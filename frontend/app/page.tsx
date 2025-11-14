@@ -1,24 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Upload, MessageSquare, TrendingUp, LogOut } from 'lucide-react';
 import { authService } from '@/lib/auth';
 
 export default function Home() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check authentication status
-    const authenticated = authService.isAuthenticated();
-    setIsAuthenticated(authenticated);
-    setIsLoading(false);
-    
-    // If not authenticated, redirect to login
-    if (!authenticated) {
-      router.push('/login');
+    // Check authentication and redirect to login if not authenticated
+    if (!authService.isAuthenticated()) {
+      router.replace('/login');
     }
   }, [router]);
 
@@ -35,17 +28,8 @@ export default function Home() {
     router.push('/login');
   };
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600">
-        <div className="text-white text-xl">Loading...</div>
-      </div>
-    );
-  }
-
-  // If not authenticated, don't show anything (will redirect)
-  if (!isAuthenticated) {
+  // Don't render if not authenticated
+  if (!authService.isAuthenticated()) {
     return null;
   }
 

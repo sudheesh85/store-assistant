@@ -68,7 +68,9 @@ export interface AuthState {
   token?: string;
   apiKey?: string;
   user?: {
+    id?: string;
     email?: string;
+    mobile?: string;
     name?: string;
   };
 }
