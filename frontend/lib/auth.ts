@@ -21,12 +21,16 @@ export const authService = {
   setAuth(auth: AuthState): void {
     if (typeof window === 'undefined') return;
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+    // Also set a cookie for middleware
+    document.cookie = `nl2sql_auth=${auth.isAuthenticated ? 'true' : 'false'}; path=/; max-age=${60 * 60 * 24 * 7}`; // 7 days
   },
 
   // Clear auth state
   clearAuth(): void {
     if (typeof window === 'undefined') return;
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    // Clear cookie
+    document.cookie = 'nl2sql_auth=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   },
 
   // Check if authenticated

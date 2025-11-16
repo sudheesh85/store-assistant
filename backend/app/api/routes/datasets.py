@@ -34,6 +34,13 @@ async def upload_dataset(
     column_descriptions: Optional[str] = Form(None),
     store_id: Optional[str] = Form(None),
 ) -> DatasetUploadResponse:
+    logger.info(
+        "Received upload request - dataset_type: %s, filename: %s, store_id: %s",
+        dataset_type,
+        file.filename,
+        store_id,
+    )
+    
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
 

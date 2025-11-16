@@ -15,8 +15,7 @@ const DATASET_TYPES = [
 
 export default function UploadPage() {
   const router = useRouter();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isClient, setIsClient] = useState(false);
   const [selectedType, setSelectedType] = useState<string>('sales');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -24,17 +23,15 @@ export default function UploadPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
+    setIsClient(true);
     // Check authentication and redirect to login if not authenticated
     if (!authService.isAuthenticated()) {
       router.replace('/login');
-      return;
     }
-    setIsAuthenticated(true);
-    setIsLoading(false);
   }, [router]);
 
-  // Show loading while checking auth
-  if (isLoading) {
+  // Show loading during SSR and initial client render
+  if (!isClient || !authService.isAuthenticated()) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-xl">Loading...</div>
@@ -42,15 +39,31 @@ export default function UploadPage() {
     );
   }
 
-  // Don't render if not authenticated
-  if (!isAuthenticated) {
-    return null;
-  }
+  const detectDatasetType = (filename: string): string => {
+    const nameLower = filename.toLowerCase();
+    
+    // Check for keywords in filename
+    if (nameLower.includes('sale') || nameLower.includes('sales')) {
+      return 'sales';
+    } else if (nameLower.includes('inventory') || nameLower.includes('stock')) {
+      return 'inventory';
+    } else if (nameLower.includes('staff') || nameLower.includes('employee')) {
+      return 'staff';
+    } else if (nameLower.includes('transaction')) {
+      return 'transactions';
+    }
+    
+    // Default to sales if no match
+    return 'sales';
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile && selectedFile.name.toLowerCase().endsWith('.csv')) {
       setFile(selectedFile);
+      // Automatically detect and set the dataset type from filename
+      const detectedType = detectDatasetType(selectedFile.name);
+      setSelectedType(detectedType);
       setUploadError(null);
     } else {
       setUploadError('Please select a valid CSV file');
@@ -114,29 +127,15 @@ export default function UploadPage() {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Data Type Selector */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                  Data Type
-                </label>
-                <select
-                  value={selectedType}
-                  onChange={(e) => setSelectedType(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
-                >
-                  {DATASET_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.icon} {type.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* File Upload */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                   Upload CSV File
                 </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  💡 Tip: Name your file with keywords like "sales", "inventory", "staff", or "transaction" 
+                  and we'll automatically detect the type!
+                </p>
                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
                   <input
                     type="file"
@@ -151,6 +150,15 @@ export default function UploadPage() {
                         <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-2" />
                         <p className="font-semibold text-gray-900 dark:text-white">{file.name}</p>
                         <p className="text-sm text-gray-500 mt-1">{(file.size / 1024).toFixed(2)} KB</p>
+                        {/* Show detected type */}
+                        <div className="mt-3 inline-flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 rounded-full">
+                          <span className="text-lg">
+                            {DATASET_TYPES.find(t => t.value === selectedType)?.icon}
+                          </span>
+                          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                            Detected: {DATASET_TYPES.find(t => t.value === selectedType)?.label}
+                          </span>
+                        </div>
                       </div>
                     ) : (
                       <div>

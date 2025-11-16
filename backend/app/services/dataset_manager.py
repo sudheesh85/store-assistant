@@ -117,6 +117,19 @@ class DatasetManager:
         sanitized_df, column_mapping = self._sanitize_dataframe(dataframe)
         row_count = len(sanitized_df)
 
+        # Add metadata columns for duplicate detection and tracking
+        upload_timestamp = datetime.utcnow().isoformat()
+        sanitized_df['_upload_timestamp'] = upload_timestamp
+        sanitized_df['_source_file'] = source_file or 'unknown'
+        
+        # Generate a hash for each row to detect duplicates
+        # Create a string from all columns (except metadata) and hash it
+        data_columns = [col for col in sanitized_df.columns 
+                       if not col.startswith('_')]
+        sanitized_df['_row_hash'] = sanitized_df[data_columns].apply(
+            lambda row: hash(tuple(row.astype(str))), axis=1
+        )
+
         table_name = f"{dataset_type}_raw"
         engine = self._get_engine(store_id)
 
@@ -128,21 +141,70 @@ class DatasetManager:
             row_count,
         )
         
-        # For now, use replace mode (original behavior)
-        # TODO: Enable append mode with metadata columns in future version
         with engine.begin() as connection:
-            sanitized_df.to_sql(table_name, connection, if_exists="replace", index=False)
+            # Check if table exists
+            from sqlalchemy import text
+            table_exists = connection.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name=:table_name"),
+                {"table_name": table_name}
+            ).fetchone()
+            
+            if table_exists:
+                # Get existing hashes to prevent duplicates
+                existing_hashes_df = pd.read_sql(
+                    f"SELECT _row_hash FROM {table_name}",
+                    connection
+                )
+                existing_hashes = set(existing_hashes_df['_row_hash'].tolist())
+                
+                # Filter out duplicate rows
+                original_count = len(sanitized_df)
+                sanitized_df = sanitized_df[~sanitized_df['_row_hash'].isin(existing_hashes)]
+                new_rows = len(sanitized_df)
+                duplicates = original_count - new_rows
+                
+                if duplicates > 0:
+                    logger.info(
+                        "Skipped %d duplicate rows, inserting %d new rows",
+                        duplicates,
+                        new_rows,
+                    )
+                
+                if new_rows == 0:
+                    logger.warning("All rows are duplicates, no new data to insert")
+                    # Still return metadata but with updated row count
+                    store_registry = self.registry.get(store_id, {})
+                    if dataset_type in store_registry:
+                        return store_registry[dataset_type]
+                else:
+                    sanitized_df.to_sql(table_name, connection, if_exists="append", index=False)
+            else:
+                # First upload, create table
+                sanitized_df.to_sql(table_name, connection, if_exists="replace", index=False)
+                logger.info("Created new table %s with %d rows", table_name, row_count)
 
+        # Get actual row count from database after deduplication
+        with engine.begin() as connection:
+            from sqlalchemy import text
+            result = connection.execute(
+                text(f"SELECT COUNT(*) FROM {table_name}")
+            ).fetchone()
+            total_row_count = result[0] if result else 0
+
+        # Build metadata only for data columns (exclude internal columns)
+        data_df = sanitized_df[[col for col in sanitized_df.columns 
+                                if not col.startswith('_')]]
+        
         merged_descriptions = merge_descriptions(dataset_type, column_descriptions)
         columns_metadata = self._build_columns_metadata(
-            sanitized_df, column_mapping, merged_descriptions
+            data_df, column_mapping, merged_descriptions
         )
 
         metadata = DatasetMetadata(
             store_id=store_id,
             dataset_type=dataset_type,
             table_name=table_name,
-            row_count=row_count,
+            row_count=total_row_count,
             source_file=source_file,
             uploaded_at=datetime.utcnow().isoformat(),
             columns=columns_metadata,
@@ -156,7 +218,13 @@ class DatasetManager:
 
     def list_datasets(self, store_id: str) -> List[DatasetMetadata]:
         store_registry = self.registry.get(store_id, {})
-        return list(store_registry.values())
+        datasets = list(store_registry.values())
+        logger.info(
+            "Listing datasets for store %s: %s",
+            store_id,
+            [d.dataset_type for d in datasets],
+        )
+        return datasets
 
     def get_dataset(self, store_id: str, dataset_type: str) -> DatasetMetadata:
         store_registry = self.registry.get(store_id, {})
@@ -228,9 +296,22 @@ class DatasetManager:
                         )
                 if parsed:
                     self.registry[store_id] = parsed
+                    logger.info(
+                        "Loaded registry for store %s with datasets: %s",
+                        store_id,
+                        list(parsed.keys()),
+                    )
         except Exception as exc:
             logger.error("Failed to load dataset registry: %s", exc, exc_info=True)
             self.registry = {}
+        
+        # Log summary of loaded registry
+        total_datasets = sum(len(datasets) for datasets in self.registry.values())
+        logger.info(
+            "Registry loaded: %d stores, %d total datasets",
+            len(self.registry),
+            total_datasets,
+        )
 
     def _persist_registry(self) -> None:
         payload = {

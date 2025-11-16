@@ -62,8 +62,7 @@ class SQLGeneratorService:
         )
 
         if not self.client:
-            # Demo mode - provide helpful message
-            return None, "⚠️ Demo Mode: AI SQL generation requires OpenAI API key. To enable full features, add your OpenAI API key in Settings."
+            return None, "OpenAI API key is not configured. Please add OPENAI_API_KEY to your .env file."
 
         try:
             response = self.client.chat.completions.create(
@@ -81,12 +80,14 @@ class SQLGeneratorService:
         llm_output = response.choices[0].message.content if response.choices else ""
         sql_query = self._extract_sql(llm_output)
         if not sql_query:
-            logger.warning(
+            logger.error(
                 "Failed to extract SQL from LLM output: %s | Question was: '%s'",
                 llm_output,
                 question,
             )
-            return None, "Unable to parse SQL from model output"
+            # Return the actual LLM output for debugging
+            error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
+            return None, error_msg
         
         logger.info("Generated SQL: %s", sql_query)
 
@@ -183,7 +184,15 @@ RULES:
 
 USER QUESTION: {question}
 
-Respond with ONLY the SQL query (no explanations, no markdown, just the SQL)."""
+⚠️ CRITICAL: Your response must contain ONLY the SQL query. 
+- NO explanations before or after
+- NO markdown formatting
+- NO comments
+- Just the raw SQL SELECT statement
+- Start your response directly with SELECT or WITH
+
+Example response format:
+SELECT * FROM sales_raw WHERE date = '2024-01-01'"""
         
         return rules
     
@@ -225,7 +234,7 @@ Respond with ONLY the SQL query (no explanations, no markdown, just the SQL)."""
             return None
         
         # Log the raw output for debugging
-        logger.debug("Raw LLM output for SQL extraction: %s", llm_output[:200])
+        logger.info("Raw LLM output for SQL extraction: %s", llm_output[:500])
         
         # Try multiple extraction strategies
         
@@ -240,29 +249,43 @@ Respond with ONLY the SQL query (no explanations, no markdown, just the SQL)."""
                 candidate = generic_fence.group(1).strip()
             else:
                 candidate = None
-        # 3. Try to find SELECT/WITH anywhere in the output
+        # 3. Try to find SELECT/WITH statement
         else:
-            match = re.search(r"\b(SELECT|WITH)\b[\s\S]*", llm_output, flags=re.IGNORECASE)
+            # Look for SELECT or WITH followed by everything until we hit common endings
+            match = re.search(
+                r"\b(SELECT|WITH)\b[\s\S]*?(?=(?:\n\n|$|```|Answer:|Explanation:|Note:))",
+                llm_output,
+                flags=re.IGNORECASE
+            )
             candidate = match.group(0).strip() if match else None
         
         if not candidate:
             # 4. Last resort: check if the entire output looks like SQL
-            if llm_output.strip().upper().startswith(("SELECT", "WITH")):
-                candidate = llm_output.strip()
+            stripped = llm_output.strip()
+            if stripped.upper().startswith(("SELECT", "WITH")):
+                candidate = stripped
             else:
-                logger.warning("Could not extract SQL from output: %s", llm_output[:100])
+                logger.warning("Could not extract SQL from output: %s", llm_output[:200])
                 return None
         
         # Clean up the candidate
-        # Remove trailing comments or markdown
+        # Remove trailing markdown or comments
         candidate = re.sub(r"```.*", "", candidate, flags=re.DOTALL)
         # Remove semicolons
         candidate = candidate.split(";", 1)[0]
-        # Remove inline SQL comments
+        # Remove inline SQL comments (-- comments)
         candidate = re.sub(r"--[^\n]*", "", candidate)
+        # Remove block comments (/* ... */)
+        candidate = re.sub(r"/\*[\s\S]*?\*/", "", candidate)
         candidate = candidate.strip()
         
-        return candidate if candidate and len(candidate) > 10 else None
+        # Final validation
+        if candidate and len(candidate) > 10:
+            logger.info("Extracted SQL: %s", candidate)
+            return candidate
+        
+        logger.warning("SQL extraction failed - candidate too short or empty")
+        return None
 
     def _validate_sql_multi_table(self, sql_query: str, datasets: List[DatasetMetadata]) -> Optional[str]:
         """Validate SQL against ALL available tables. Allows JOINs."""
