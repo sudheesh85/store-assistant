@@ -44,13 +44,18 @@ class IntentClassifier:
 QUESTION: {question}
 
 Is this a:
-A) DATA QUERY - user wants to see/fetch NEW data (show, list, get, how many, what are, top, total, who is, which)
-B) INSIGHT/ADVICE - user wants recommendations/analysis (how to improve, what should I do, suggestions, advice, why, strategy)
+A) DATA QUERY - user wants to SEE/FETCH actual data/metrics (show, list, get, how many, what are, top, total, who is, which, how is X, what is X, performance, sales, revenue, count)
+   Examples: "how is my store performance", "what are sales", "show me revenue", "ente store performance", "how many products"
+B) INSIGHT/ADVICE - user wants recommendations/analysis/strategy (how to improve, what should I do, suggestions, advice, why, strategy, how can I)
+   Examples: "how to improve sales", "what should I do", "give me advice", "suggestions for better performance"
 C) REFORMAT - user wants previous answer reformatted/translated (in malayalam, translate, explain, tell me in, give me in, can you give)
+   Examples: "give in malayalam", "translate this", "explain in simple terms"
+
+IMPORTANT: Questions asking "how is X" or "what is X" or "ente X" are DATA QUERIES (user wants to see the data), NOT insights.
 
 Respond with ONLY ONE WORD:
-- "data_query" (if asking for NEW data or specific information)
-- "insight" (if asking for recommendations/analysis/strategy)
+- "data_query" (if asking to SEE data/metrics/performance)
+- "insight" (if asking for recommendations/strategy/advice)
 - "reformat" (if asking to translate/reformat previous answer)"""
 
         try:

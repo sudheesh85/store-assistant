@@ -93,10 +93,12 @@ async def nl2sql_ask(payload: NL2SQLRequest) -> NL2SQLResponse:
 
     visualization_payload = None
     if settings.ENABLE_VISUALIZATION_SUGGESTIONS:
+        # nl2sql endpoint always generates data queries, so intent is "data_query"
         suggestion = default_visualizer.suggest(
             payload.question,
             result_data["columns"],
             result_data["rows"],
+            intent="data_query",  # nl2sql always queries data
         )
         if suggestion:
             viz_type = suggestion.get("type", "custom")

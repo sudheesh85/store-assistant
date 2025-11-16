@@ -1,57 +1,137 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/frontend/node_modules
-/backend/.venv
-/backend/venv
-/.pnp
-.pnp.js
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-/frontend/.next
-/frontend/out
-
-# data & misc
-.DS_Store
-*.pem
-/backend/storage/
-/backend/data/
-/storage/
-*.db
-*.sqlite
-*.log
-
 # Python
-*.pyc
-*.pyo
-*.pyd
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
 
-# debug
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv
+/backend/.venv
+/backend/venv
+/.venv
+/venv
+
+# Node.js
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnp
+.pnp.js
+package-lock.json
+yarn.lock
 
-# local env files
-.env*.local
-.env
-.env.example
-
-# vercel
+# Next.js
+.next/
+out/
+build/
 .vercel
-
-# typescript
 *.tsbuildinfo
 next-env.d.ts
 
+# Frontend specific
+/frontend/node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/build/
+/frontend/.env*.local
+/frontend/.env
+
+# Backend specific
+/backend/__pycache__/
+/backend/*.pyc
+/backend/.venv/
+/backend/venv/
+/backend/storage/
+/backend/data/
+/backend/*.db
+/backend/*.sqlite
+/backend/*.log
+
+# Data & Storage
+*.db
+*.sqlite
+*.sqlite3
+*.log
+storage/
+data/
+*.csv.bak
+
+# Environment variables
+.env
+.env.local
+.env*.local
+.env.production
+.env.development
+.env.test
+.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.cache/
+
+# Deployment
+deploy.zip
+*.zip
+frontend-deploy.zip
+
+# Documentation (optional - uncomment if you want to ignore docs)
+# *.md
+# !README.md

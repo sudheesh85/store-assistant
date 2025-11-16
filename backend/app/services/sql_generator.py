@@ -51,7 +51,9 @@ class SQLGeneratorService:
             "The user question may be in Malayalam, Manglish, or English. "
             "You have access to multiple tables - analyze the question and choose the most appropriate table(s). "
             "Use conversation context to understand follow-up questions with pronouns (they/them/those). "
-            "If a follow-up asks 'who are they' after 'how many employees', list the employees."
+            "If a follow-up asks 'who are they' after 'how many employees', list the employees. "
+            "For 'performance' questions, generate aggregate metrics (COUNT, SUM, AVG) from sales tables. "
+            "NEVER return '-- NO_SQL' - always generate a query, even if vague (use summary metrics)."
         )
         user_prompt = self._build_multi_table_prompt(question, all_schemas, conversation_context)
 
@@ -78,16 +80,42 @@ class SQLGeneratorService:
             return None, f"LLM error: {exc}"
 
         llm_output = response.choices[0].message.content if response.choices else ""
-        sql_query = self._extract_sql(llm_output)
-        if not sql_query:
-            logger.error(
-                "Failed to extract SQL from LLM output: %s | Question was: '%s'",
-                llm_output,
-                question,
-            )
-            # Return the actual LLM output for debugging
-            error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
-            return None, error_msg
+        
+        # Check if LLM returned "-- NO_SQL"
+        if "-- NO_SQL" in llm_output.upper() or "NO_SQL" in llm_output.upper():
+            logger.warning("LLM returned NO_SQL for question: '%s'. Generating fallback query.", question)
+            # Generate fallback query for performance questions
+            question_lower = question.lower()
+            if any(kw in question_lower for kw in ['performance', 'ente store', 'engane', 'how is']):
+                sql_query = self._generate_fallback_performance_query(question, datasets)
+                if sql_query:
+                    logger.info("Generated fallback performance query: %s", sql_query)
+                else:
+                    error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
+                    return None, error_msg
+            else:
+                error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
+                return None, error_msg
+        else:
+            sql_query = self._extract_sql(llm_output)
+            if not sql_query:
+                logger.warning(
+                    "Failed to extract SQL from LLM output: %s | Question was: '%s'",
+                    llm_output,
+                    question,
+                )
+                # Try fallback for performance questions
+                question_lower = question.lower()
+                if any(kw in question_lower for kw in ['performance', 'ente store', 'engane', 'how is']):
+                    sql_query = self._generate_fallback_performance_query(question, datasets)
+                    if sql_query:
+                        logger.info("Generated fallback performance query after extraction failure")
+                    else:
+                        error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
+                        return None, error_msg
+                else:
+                    error_msg = f"Unable to generate SQL query. LLM response: {llm_output[:200]}"
+                    return None, error_msg
         
         logger.info("Generated SQL: %s", sql_query)
 
@@ -180,7 +208,23 @@ RULES:
 10. Alias grouped results as `category` and numeric aggregations as `value` when appropriate
 11. For date/time trends, alias columns as `date` and `value`
 12. Ensure all column names exist exactly as shown in the schema
-13. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
+
+**PERFORMANCE QUESTIONS** (ente store performance, how is performance, store performance):
+- "ente store performance" or "how is my store performance" → Generate aggregate metrics:
+  - Total sales count: COUNT(*) FROM sales_raw
+  - Total revenue: SUM(price) or SUM(total_price) or SUM(amount) FROM sales_raw
+  - Average transaction: AVG(price) FROM sales_raw
+  - Date range: MIN(date) and MAX(date) FROM sales_raw
+  - Use UNION ALL or multiple columns to show all metrics in one result
+  - Example: SELECT 'Total Sales' as metric, COUNT(*) as value FROM sales_raw UNION ALL SELECT 'Total Revenue', SUM(price) FROM sales_raw
+
+**MALAYALAM/MANGLISH PATTERNS**:
+- "ente store performance" = "my store performance" = aggregate sales/revenue metrics
+- "engane undu" = "how is" = show me the data/metrics
+- "ethra" = "how many" = COUNT query
+- "enna" = "what" = SELECT query
+
+13. **NEVER return `-- NO_SQL`** - Always generate SQL even if question is vague. For vague questions, generate a summary query showing key metrics.
 
 USER QUESTION: {question}
 
@@ -226,6 +270,85 @@ SELECT * FROM sales_raw WHERE date = '2024-01-01'"""
             "Respond with only the SQL query (no explanations)."
         )
 
+    def _generate_fallback_performance_query(
+        self, question: str, datasets: List[DatasetMetadata]
+    ) -> Optional[str]:
+        """Generate a fallback performance query when LLM fails."""
+        # Find sales table
+        sales_table = None
+        for dataset in datasets:
+            if dataset.dataset_type.lower() in ['sales', 'transactions']:
+                sales_table = dataset
+                break
+        
+        if not sales_table:
+            return None
+        
+        # Find price/revenue column
+        price_columns = ['price', 'total_price', 'amount', 'revenue', 'net_sales', 'sale_amount']
+        price_col = None
+        for col in sales_table.columns:
+            if col.name.lower() in price_columns:
+                price_col = col.name
+                break
+        
+        # Find date column
+        date_columns = ['date', 'sale_date', 'transaction_date', 'created_at', 'sold_at']
+        date_col = None
+        for col in sales_table.columns:
+            if col.name.lower() in date_columns:
+                date_col = col.name
+                break
+        
+        # Build query
+        table_name = sales_table.table_name
+        
+        if price_col and date_col:
+            # Comprehensive performance metrics
+            return f"""SELECT 
+    'Total Sales' as metric,
+    COUNT(*) as value
+FROM {table_name}
+UNION ALL
+SELECT 
+    'Total Revenue',
+    COALESCE(SUM({price_col}), 0)
+FROM {table_name}
+UNION ALL
+SELECT 
+    'Average Transaction',
+    COALESCE(AVG({price_col}), 0)
+FROM {table_name}
+UNION ALL
+SELECT 
+    'First Sale Date',
+    MIN({date_col})
+FROM {table_name}
+UNION ALL
+SELECT 
+    'Last Sale Date',
+    MAX({date_col})
+FROM {table_name}"""
+        elif price_col:
+            # Just revenue metrics
+            return f"""SELECT 
+    'Total Sales' as metric,
+    COUNT(*) as value
+FROM {table_name}
+UNION ALL
+SELECT 
+    'Total Revenue',
+    COALESCE(SUM({price_col}), 0)
+FROM {table_name}
+UNION ALL
+SELECT 
+    'Average Transaction',
+    COALESCE(AVG({price_col}), 0)
+FROM {table_name}"""
+        else:
+            # Just count
+            return f"SELECT COUNT(*) as total_sales FROM {table_name}"
+    
     # ------------------------------------------------------------------
     # Validation utilities
     # ------------------------------------------------------------------

@@ -26,14 +26,27 @@ class VisualizationService:
         else:
             self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-    def suggest(self, question: str, columns: List[str], rows: List[List[Any]]) -> Optional[Dict[str, Any]]:
-        """Use LLM to decide if chart is appropriate and what type."""
+    def suggest(
+        self, 
+        question: str, 
+        columns: List[str], 
+        rows: List[List[Any]],
+        intent: str = "data_query"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Suggest visualization based on intent and data structure.
+        
+        Args:
+            question: User's question
+            columns: Column names from query result
+            rows: Data rows from query result
+            intent: Intent classification result ("data_query", "insight", "reformat")
+        """
         if not rows or not columns:
             return None
 
         num_cols = len(columns)
         num_rows = len(rows)
-        question_lower = question.lower()
 
         # ========================================
         # STRICT RULES: NO CHART for these cases
@@ -48,74 +61,36 @@ class VisualizationService:
         if num_rows == 0:
             return None
         
-        # ========================================
-        # CHECK FOR CHART TRIGGERS FIRST (priority)
-        # ========================================
-        # - Aggregated metrics (top N, total, count, sum, average)
-        # - Time series (trends over time)
-        # - Comparisons (highest, lowest, best, worst)
-        
-        chart_trigger_keywords = [
-            'top ', 'bottom ', 'highest', 'lowest', 'best', 'worst',
-            'most', 'least', 'total', 'sum', 'average', 'count',
-            'trend', 'over time', 'by month', 'by day', 'by year',
-            'compare', 'comparison', 'growth', 'change'
-        ]
-        should_consider_chart = any(keyword in question_lower for keyword in chart_trigger_keywords)
-        
-        # If chart trigger found, skip list checks (trend/aggregation questions take priority)
-        if should_consider_chart:
-            # Only block if columns contain TEXT data (names, emails, IDs, etc.)
-            text_column_indicators = ['name', 'email', 'phone', 'id', 'address', 'description', 'status', 'role']
-            has_text_columns = any(
-                any(indicator in col.lower() for indicator in text_column_indicators)
-                for col in columns
-            )
-            if has_text_columns:
-                logger.info("No chart: Data contains text columns (names, emails, etc.)")
-                return None
-            # Proceed to LLM/fallback for chart generation
-        else:
-            # No chart trigger found - apply strict blocking rules
-            
-            # 3. Questions asking about SPECIFIC people/entities (who is X, what is Y)
-            specific_entity_patterns = [
-                'who is', 'who are', 'what is', 'which is',
-                'tell me about', 'show me about', 'details of',
-                'information about', 'info about'
-            ]
-            if any(pattern in question_lower for pattern in specific_entity_patterns):
-                logger.info("No chart: Question asks about specific entity")
-                return None
-            
-            # 4. Questions asking for LISTS or ALL items
-            list_keywords = [
-                'list', 'show all', 'display all',
-                'all staff', 'all products', 'all items', 'all sales',
-            ]
-            if any(keyword in question_lower for keyword in list_keywords):
-                logger.info("No chart: Question asks for list/details")
-                return None
-            
-            # 5. Check if columns contain TEXT data (names, emails, IDs, etc.)
-            text_column_indicators = ['name', 'email', 'phone', 'id', 'address', 'description', 'status', 'role']
-            has_text_columns = any(
-                any(indicator in col.lower() for indicator in text_column_indicators)
-                for col in columns
-            )
-            if has_text_columns:
-                logger.info("No chart: Data contains text columns (names, emails, etc.)")
-                return None
-            
-            # No clear chart trigger and no blocking rules matched
-            logger.info("No chart: Question doesn't ask for aggregated/comparative data")
+        # 3. Only "data_query" intent should get charts (insights/reformat don't need charts)
+        if intent != "data_query":
+            logger.info("No chart: Intent is '%s' (only data_query gets charts)", intent)
             return None
+        
+        # 4. Check if columns contain TEXT data (names, emails, IDs, etc.) - block charts
+        text_column_indicators = ['name', 'email', 'phone', 'id', 'address', 'description', 'status', 'role']
+        has_text_columns = any(
+            any(indicator in col.lower() for indicator in text_column_indicators)
+            for col in columns
+        )
+        if has_text_columns:
+            logger.info("No chart: Data contains text columns (names, emails, etc.)")
+            return None
+        
+        # 5. Special case: If data structure is "metric" and "value" (perfect for charts)
+        # This is data-driven, not keyword-driven
+        if num_cols == 2:
+            col_names_lower = [col.lower() for col in columns]
+            if ('metric' in col_names_lower or 'category' in col_names_lower) and \
+               ('value' in col_names_lower or 'amount' in col_names_lower or 'count' in col_names_lower):
+                logger.info("Detected metric/value structure - perfect for bar chart")
+                # Proceed to chart generation (skip LLM, use fallback directly)
+                return self._fallback_visualization(question, columns, rows)
 
-        # Use LLM to decide
+        # Use LLM to decide chart type (if available)
         if self.client:
             return self._llm_based_visualization(question, columns, rows)
         else:
-            # Fallback: simple rules
+            # Fallback: simple rules based on data structure
             return self._fallback_visualization(question, columns, rows)
 
     def _llm_based_visualization(
@@ -130,26 +105,29 @@ class VisualizationService:
         sample_data = rows[:3]  # First 3 rows
         data_summary = f"Columns: {', '.join(columns)}\nRows: {num_rows}\nSample: {sample_data}"
         
-        prompt = f"""Does this question ask for AGGREGATED/COMPARATIVE data that NEEDS a chart?
+        prompt = f"""Determine the best chart type for this data query result.
 
 QUESTION: "{question}"
 DATA: {num_cols} columns, {num_rows} rows
 COLUMNS: {', '.join(columns)}
+SAMPLE DATA: {rows[:3] if rows else 'No data'}
 
-⚠️ DEFAULT: "none" (NO CHART)
+You already know this is a DATA QUERY (not insight/reformat), so focus on chart type selection.
 
-❌ MUST RETURN "none" IF:
-- Asking about specific person/entity (who is X, what is Y)
-- Wants to see details/records
-- Text/categorical data (names, IDs, statuses)
-- More than 2 columns
+Chart Type Rules:
+- "bar" → Comparing multiple items/categories (top N, best/worst, performance metrics, metric/value pairs)
+- "line" → Time series / trends over time (by date, by month, over time, trends)
+- "metric" → Single number display (total count, single sum, one metric)
+- "none" → Not suitable for visualization (detailed records, text data)
 
-✅ ONLY return chart type IF:
-- "top N" / "highest" / "lowest" / "best" / "worst" → "bar"
-- "trend" / "over time" / "by month" → "line"
-- "total" / "count" / "sum" (SINGLE NUMBER) → "metric"
+Examples:
+- "top 5 products" → bar
+- "sales by month" → line  
+- "total revenue" → metric
+- "performance metrics" (multiple rows) → bar
+- "list all employees" → none
 
-Respond with ONE WORD ONLY: none / bar / line / metric"""
+Respond with ONE WORD ONLY: bar / line / metric / none"""
 
         try:
             response = self.client.chat.completions.create(
@@ -183,11 +161,24 @@ Respond with ONE WORD ONLY: none / bar / line / metric"""
                     "title": question,
                 }
             elif chart_type == "bar" and num_cols == 2:
-                return {
-                    "type": "bar_horizontal",
-                    "x": columns[1],
-                    "y": columns[0],
-                }
+                # Check if it's metric/value structure
+                col_names_lower = [col.lower() for col in columns]
+                if ('metric' in col_names_lower or 'category' in col_names_lower):
+                    # Metric/value: values on X, metrics on Y
+                    value_col_idx = 1 if 'value' in columns[1].lower() or 'amount' in columns[1].lower() or 'count' in columns[1].lower() else 0
+                    metric_col_idx = 1 - value_col_idx
+                    return {
+                        "type": "bar_horizontal",
+                        "x": columns[value_col_idx],
+                        "y": columns[metric_col_idx],
+                    }
+                else:
+                    # Regular bar chart
+                    return {
+                        "type": "bar_horizontal",
+                        "x": columns[1],
+                        "y": columns[0],
+                    }
             elif chart_type == "line" and num_cols == 2:
                 return {
                     "type": "line",
@@ -225,6 +216,22 @@ Respond with ONE WORD ONLY: none / bar / line / metric"""
                 }
             except (ValueError, TypeError):
                 pass
+        
+        # Metric/Value structure (perfect for bar chart)
+        if num_cols == 2 and num_rows > 1:
+            col_names_lower = [col.lower() for col in columns]
+            if ('metric' in col_names_lower or 'category' in col_names_lower) and \
+               ('value' in col_names_lower or 'amount' in col_names_lower or 'count' in col_names_lower):
+                # Find which column is metric and which is value
+                metric_col_idx = 0 if 'metric' in columns[0].lower() or 'category' in columns[0].lower() else 1
+                value_col_idx = 1 - metric_col_idx
+                
+                logger.info("Fallback: Detected metric/value structure, generating bar chart")
+                return {
+                    "type": "bar_horizontal",
+                    "x": columns[value_col_idx],  # Values on X axis
+                    "y": columns[metric_col_idx],  # Metrics on Y axis
+                }
         
         return None
 

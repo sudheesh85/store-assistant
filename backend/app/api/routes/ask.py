@@ -93,6 +93,16 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
     has_context = len(context_questions) > 0
     intent = intent_classifier.classify(payload.question, has_context=has_context)
     
+    # Fallback: Force data_query for performance/metric questions that ask "how is" or "what is"
+    question_lower = payload.question.lower()
+    performance_keywords = ['performance', 'sales', 'revenue', 'profit', 'growth', 'trend']
+    how_is_patterns = ['how is', 'how are', 'what is', 'what are', 'ente', 'engane', 'ethra', 'enna']
+    
+    if intent == "insight" and any(kw in question_lower for kw in performance_keywords):
+        if any(pattern in question_lower for pattern in how_is_patterns):
+            logger.info("Overriding intent: 'insight' -> 'data_query' (performance question asking for data)")
+            intent = "data_query"
+    
     logger.info(
         "Processing question: '%s' | Intent: %s | Context: %d previous questions",
         payload.question,
@@ -206,10 +216,12 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
     visualization = None
     if settings.ENABLE_VISUALIZATION_SUGGESTIONS:
         try:
+            # Pass intent to visualization service (no hardcoded keywords!)
             suggestion = default_visualizer.suggest(
                 payload.question,
                 execution["columns"],
                 execution["rows"],
+                intent=intent,  # Use intent classifier result
             )
             visualization = _map_visualization(suggestion)
         except Exception as exc:
