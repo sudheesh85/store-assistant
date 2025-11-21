@@ -151,6 +151,28 @@ def _process_question(payload: AskRequestModel) -> AskResponseModel:
         datasets,
         conversation_context=context_questions
     )
+    
+    # If LLM explicitly says NO_SQL, treat it as a general chat/insight request
+    if generation_error and "NO_SQL" in generation_error:
+        logger.info("LLM indicated NO_SQL for question: '%s'. Falling back to general chat.", payload.question)
+        
+        # Use insights generator to provide a friendly conversational response
+        # We pass the question as a "reformat" or "insight" request to get a chatty answer
+        chat_response = insights_generator.generate(
+            f"User asked: {payload.question}. This is NOT a database question. Respond in a friendly, helpful way as a store assistant. If they asked 'who are you', introduce yourself as the AI Store Assistant for their retail shop.",
+            store_id,
+            context_data=None,
+        )
+        
+        session_history[session_id].append(payload.question)
+        return AskResponseModel(
+            success=True,
+            response=chat_response,
+            sql=None,
+            data=None,
+            visualization=None,
+        )
+
     if generation_error or not sql_query:
         return AskResponseModel(
             success=False,
