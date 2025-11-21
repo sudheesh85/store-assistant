@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/lib/auth';
+import { apiClient } from '@/lib/api';
 import ChatContainer from '@/components/ChatContainer';
 
 export default function ChatPage() {
@@ -14,6 +15,12 @@ export default function ChatPage() {
     // Check authentication and redirect to login if not authenticated
     if (!authService.isAuthenticated()) {
       router.replace('/login');
+    } else {
+      // Set token for API client
+      const token = authService.getToken();
+      if (token) {
+        apiClient.setAuth(token);
+      }
     }
   }, [router]);
 

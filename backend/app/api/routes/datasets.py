@@ -27,12 +27,19 @@ def _coerce_store_id(store_id: Optional[str]) -> str:
     return store_id or settings.DEFAULT_STORE_ID
 
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from app.api.deps import get_current_active_user
+from app.models.user import User
+
+# ... imports ...
+
 @router.post("/upload", response_model=DatasetUploadResponse)
 async def upload_dataset(
     dataset_type: str = Form(...),
     file: UploadFile = File(...),
     column_descriptions: Optional[str] = Form(None),
     store_id: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_active_user),
 ) -> DatasetUploadResponse:
     logger.info(
         "Received upload request - dataset_type: %s, filename: %s, store_id: %s",
@@ -44,17 +51,21 @@ async def upload_dataset(
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
 
-    contents = await file.read()
+    # Check file size without reading into memory
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+    
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
-    if len(contents) > max_bytes:
+    if file_size > max_bytes:
         raise HTTPException(
             status_code=400,
             detail=f"File exceeds {settings.MAX_UPLOAD_MB} MB limit",
         )
 
-    buffer = io.BytesIO(contents)
     try:
-        dataframe = pd.read_csv(buffer)
+        # Read directly from the file object to save memory
+        dataframe = pd.read_csv(file.file)
     except Exception as exc:
         logger.error("Failed to parse CSV: %s", exc)
         raise HTTPException(status_code=400, detail="Unable to parse CSV file") from exc
@@ -89,7 +100,10 @@ async def upload_dataset(
 
 
 @router.get("", response_model=DatasetListResponse)
-async def list_datasets(store_id: Optional[str] = Query(None)) -> DatasetListResponse:
+async def list_datasets(
+    store_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_active_user),
+) -> DatasetListResponse:
     target_store_id = _coerce_store_id(store_id)
     datasets = [
         _to_model(ds) for ds in dataset_manager.list_datasets(target_store_id)
@@ -98,7 +112,11 @@ async def list_datasets(store_id: Optional[str] = Query(None)) -> DatasetListRes
 
 
 @router.get("/{dataset_type}", response_model=DatasetSchemaResponse)
-async def get_dataset(dataset_type: str, store_id: Optional[str] = Query(None)) -> DatasetSchemaResponse:
+async def get_dataset(
+    dataset_type: str, 
+    store_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_active_user),
+) -> DatasetSchemaResponse:
     target_store_id = _coerce_store_id(store_id)
     try:
         metadata = dataset_manager.get_dataset(target_store_id, dataset_type)
@@ -109,7 +127,11 @@ async def get_dataset(dataset_type: str, store_id: Optional[str] = Query(None)) 
 
 
 @router.delete("/{dataset_type}", response_model=DatasetDeleteResponse)
-async def delete_dataset(dataset_type: str, store_id: Optional[str] = Query(None)) -> DatasetDeleteResponse:
+async def delete_dataset(
+    dataset_type: str, 
+    store_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_active_user),
+) -> DatasetDeleteResponse:
     target_store_id = _coerce_store_id(store_id)
     dataset_manager.delete_dataset(target_store_id, dataset_type)
     return DatasetDeleteResponse(success=True, dataset_type=dataset_type)

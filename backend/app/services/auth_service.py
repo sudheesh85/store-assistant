@@ -17,13 +17,16 @@ class AuthService:
 
     def __init__(self):
         self.users_file = settings.DATA_STORAGE_PATH / "users.json"
+        self.tokens_file = settings.DATA_STORAGE_PATH / "tokens.json"
         self.users_file.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_users_file()
+        self._ensure_files()
 
-    def _ensure_users_file(self):
-        """Ensure users file exists."""
+    def _ensure_files(self):
+        """Ensure users and tokens files exist."""
         if not self.users_file.exists():
             self.users_file.write_text("{}")
+        if not self.tokens_file.exists():
+            self.tokens_file.write_text("{}")
 
     def _load_users(self) -> dict[str, UserInDB]:
         """Load users from file."""
@@ -43,6 +46,17 @@ class AuthService:
             for user_id, user in users.items()
         }
         self.users_file.write_text(json.dumps(data, indent=2, default=str))
+
+    def _load_tokens(self) -> dict[str, dict]:
+        """Load tokens from file."""
+        try:
+            return json.loads(self.tokens_file.read_text())
+        except Exception:
+            return {}
+
+    def _save_tokens(self, tokens: dict[str, dict]):
+        """Save tokens to file."""
+        self.tokens_file.write_text(json.dumps(tokens, indent=2, default=str))
 
     def _hash_password(self, password: str) -> str:
         """Hash a password."""
@@ -118,8 +132,15 @@ class AuthService:
         users[user_id] = user_in_db
         self._save_users(users)
 
-        # Generate token
+        # Generate and save token
         token = self._generate_token()
+        tokens = self._load_tokens()
+        tokens[token] = {
+            "user_id": user_id,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(days=7)).isoformat()
+        }
+        self._save_tokens(tokens)
 
         # Return user without password hash
         user = User(
@@ -169,13 +190,21 @@ class AuthService:
             raise ValueError("Account is inactive")
 
         # Update last login
+        now = datetime.utcnow()
         users = self._load_users()
-        user_in_db.last_login = datetime.utcnow()
+        user_in_db.last_login = now
         users[user_id] = user_in_db
         self._save_users(users)
 
-        # Generate token
+        # Generate and save token
         token = self._generate_token()
+        tokens = self._load_tokens()
+        tokens[token] = {
+            "user_id": user_id,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(days=7)).isoformat()
+        }
+        self._save_tokens(tokens)
 
         # Return user without password hash
         user = User(
@@ -193,15 +222,37 @@ class AuthService:
     def verify_token(self, token: str) -> Optional[User]:
         """
         Verify a token and return the associated user.
-        For simplicity, we're not storing tokens in this implementation.
-        In production, you should store tokens with expiry.
         """
-        # In a real implementation, you would:
-        # 1. Look up the token in a tokens table
-        # 2. Check if it's expired
-        # 3. Return the associated user
-        # For now, we just return None to indicate token validation is not implemented
-        return None
+        tokens = self._load_tokens()
+        token_data = tokens.get(token)
+        
+        if not token_data:
+            return None
+            
+        # Check expiry
+        expires_at = datetime.fromisoformat(token_data["expires_at"])
+        if datetime.utcnow() > expires_at:
+            # Clean up expired token
+            del tokens[token]
+            self._save_tokens(tokens)
+            return None
+            
+        user_id = token_data["user_id"]
+        users = self._load_users()
+        user_in_db = users.get(user_id)
+        
+        if not user_in_db or not user_in_db.is_active:
+            return None
+            
+        return User(
+            id=user_in_db.id,
+            email=user_in_db.email,
+            mobile=user_in_db.mobile,
+            name=user_in_db.name,
+            created_at=user_in_db.created_at,
+            last_login=user_in_db.last_login,
+            is_active=user_in_db.is_active,
+        )
 
 
 # Global auth service instance

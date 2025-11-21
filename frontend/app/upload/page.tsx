@@ -27,6 +27,12 @@ export default function UploadPage() {
     // Check authentication and redirect to login if not authenticated
     if (!authService.isAuthenticated()) {
       router.replace('/login');
+    } else {
+      // Set token for API client
+      const token = authService.getToken();
+      if (token) {
+        apiClient.setAuth(token);
+      }
     }
   }, [router]);
 
@@ -41,7 +47,7 @@ export default function UploadPage() {
 
   const detectDatasetType = (filename: string): string => {
     const nameLower = filename.toLowerCase();
-    
+
     // Check for keywords in filename
     if (nameLower.includes('sale') || nameLower.includes('sales')) {
       return 'sales';
@@ -52,7 +58,7 @@ export default function UploadPage() {
     } else if (nameLower.includes('transaction')) {
       return 'transactions';
     }
-    
+
     // Default to sales if no match
     return 'sales';
   };
@@ -84,7 +90,7 @@ export default function UploadPage() {
       await apiClient.uploadDataset(file, selectedType, {
         storeId: 'demo-store',
       });
-      
+
       setUploadSuccess(true);
       setTimeout(() => {
         router.push('/chat');
@@ -133,7 +139,7 @@ export default function UploadPage() {
                   Upload CSV File
                 </label>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  💡 Tip: Name your file with keywords like "sales", "inventory", "staff", or "transaction" 
+                  💡 Tip: Name your file with keywords like "sales", "inventory", "staff", or "transaction"
                   and we'll automatically detect the type!
                 </p>
                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">

@@ -214,8 +214,8 @@ Respond naturally in Malayalam or English (match their question language)."""
                 return None
             
             # Get staff_id for this person
-            staff_sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name = '{person_name}' LIMIT 1"
-            staff_result = query_executor.execute(store_id, staff_sql)
+            staff_sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name = :person_name LIMIT 1"
+            staff_result = query_executor.execute(store_id, staff_sql, {"person_name": person_name})
             
             if not staff_result or not staff_result["rows"]:
                 return None
@@ -235,9 +235,9 @@ Respond naturally in Malayalam or English (match their question language)."""
                 MIN(sale_date) as first_sale_date,
                 MAX(sale_date) as last_sale_date
             FROM {sales_dataset.table_name}
-            WHERE staff_id = '{staff_id}'
+            WHERE staff_id = :staff_id
             """
-            sales_result = query_executor.execute(store_id, sales_sql)
+            sales_result = query_executor.execute(store_id, sales_sql, {"staff_id": staff_id})
             
             if not sales_result or not sales_result["rows"]:
                 return None
@@ -289,9 +289,10 @@ Respond naturally in Malayalam or English (match their question language)."""
                     continue
                 
                 # Query staff data for this person
-                sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name LIKE '%{name}%' LIMIT 1"
+                # Use parameterized query for safety
+                sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name LIKE :name_pattern LIMIT 1"
                 try:
-                    staff_result = query_executor.execute(store_id, sql)
+                    staff_result = query_executor.execute(store_id, sql, {"name_pattern": f"%{name}%"})
                     if staff_result and staff_result["rows"]:
                         # Found the person! Now get their sales performance
                         staff_row = dict(zip(staff_result["columns"], staff_result["rows"][0]))
@@ -305,9 +306,9 @@ Respond naturally in Malayalam or English (match their question language)."""
                                 SUM(total_price) as total_revenue,
                                 AVG(total_price) as avg_transaction
                             FROM {sales_dataset.table_name}
-                            WHERE staff_id = '{staff_id}'
+                            WHERE staff_id = :staff_id
                             """
-                            sales_result = query_executor.execute(store_id, sales_sql)
+                            sales_result = query_executor.execute(store_id, sales_sql, {"staff_id": staff_id})
                             
                             # Combine staff info with sales performance
                             combined_data = {

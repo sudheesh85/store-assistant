@@ -180,7 +180,14 @@ RULES:
 10. Alias grouped results as `category` and numeric aggregations as `value` when appropriate
 11. For date/time trends, alias columns as `date` and `value`
 12. Ensure all column names exist exactly as shown in the schema
-13. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
+13. **Infer reasonable logic for qualitative terms**:
+    - "Low stock" / "Running out" → ORDER BY stock/quantity ASC LIMIT 10
+    - "Best selling" → ORDER BY total_sales DESC LIMIT 10
+    - "Recent" → ORDER BY date_column DESC LIMIT 10
+14. **Malayalam/Manglish Support**:
+    - "സ്റ്റോക്ക് കുറവുള്ള items?" (Items with low stock?) → SELECT * FROM inventory_raw ORDER BY stock_on_hand ASC LIMIT 10
+    - "കൂടുതൽ വിറ്റ സാധനങ്ങൾ" (Most sold items) → Aggregated sales query
+15. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
 
 USER QUESTION: {question}
 
@@ -292,8 +299,11 @@ SELECT * FROM sales_raw WHERE date = '2024-01-01'"""
         upper = sql_query.upper()
         
         # Check for dangerous operations
-        if any(keyword in upper for keyword in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "ATTACH", "DETACH", "PRAGMA"]):
-            return "Only read-only SELECT queries are allowed"
+        # Check for dangerous operations using word boundaries
+        forbidden_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "ATTACH", "DETACH", "PRAGMA"]
+        for keyword in forbidden_keywords:
+            if re.search(r"\b" + re.escape(keyword) + r"\b", upper):
+                return f"Only read-only SELECT queries are allowed (detected forbidden keyword: {keyword})"
         
         if sql_query.count(";") > 0:
             return "Multiple statements are not allowed"

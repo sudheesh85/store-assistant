@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Upload, MessageSquare, TrendingUp, LogOut } from 'lucide-react';
 import { authService } from '@/lib/auth';
+import { apiClient } from '@/lib/api';
 
 export default function Home() {
   const router = useRouter();
@@ -14,6 +15,12 @@ export default function Home() {
     // Check authentication and redirect to login if not authenticated
     if (!authService.isAuthenticated()) {
       router.replace('/login');
+    } else {
+      // Set token for API client
+      const token = authService.getToken();
+      if (token) {
+        apiClient.setAuth(token);
+      }
     }
   }, [router]);
 
@@ -66,7 +73,7 @@ export default function Home() {
               Your intelligent retail analytics assistant for Kerala SMB stores
             </p>
             <p className="text-lg text-white/80 mt-3">
-              Ask questions in <strong>Malayalam or English</strong>, get instant insights from your sales, 
+              Ask questions in <strong>Malayalam or English</strong>, get instant insights from your sales,
               inventory, and staff data.
             </p>
           </div>
@@ -80,7 +87,7 @@ export default function Home() {
               <Upload className="w-6 h-6" />
               Upload Data & Get Started
             </button>
-            
+
             <button
               onClick={handleGoToChat}
               className="bg-white/10 backdrop-blur-md text-white border-2 border-white/30 hover:bg-white/20 font-bold py-5 px-8 rounded-xl text-lg transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-3"

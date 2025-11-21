@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -390,6 +391,8 @@ class DatasetManager:
         return samples
 
     def _store_db_path(self, store_id: str) -> Path:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", store_id):
+            raise ValueError(f"Invalid store_id '{store_id}'. Only alphanumeric, hyphen, and underscore allowed.")
         return self.store_base_path / f"{store_id}.db"
 
     def _get_engine(self, store_id: str) -> Engine:

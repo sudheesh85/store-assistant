@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class QueryExecutorService:
     """Execute validated SQL queries against store-scoped SQLite database."""
 
-    def execute(self, store_id: str, sql_query: str) -> Dict[str, Any]:
+    def execute(self, store_id: str, sql_query: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
         self._assert_read_only(sql_query)
         engine = dataset_manager.get_engine_for_store(store_id)
         rows: List[List[Any]] = []
@@ -23,7 +23,7 @@ class QueryExecutorService:
         truncated = False
 
         with engine.connect() as connection:
-            result = connection.execute(text(sql_query))
+            result = connection.execute(text(sql_query), params or {})
             if result.returns_rows:
                 column_names = list(result.keys())
                 for idx, row in enumerate(result):
@@ -61,10 +61,14 @@ class QueryExecutorService:
             "CREATE",
             "VACUUM",
         ]
-        if not re.match(r"\s*(SELECT|WITH)\b", upper):
+        # Ensure query starts with SELECT or WITH (case-insensitive)
+        if not re.match(r"^\s*(SELECT|WITH)\b", upper):
             raise ValueError("Only SELECT queries are allowed")
+        
+        # Check for forbidden keywords with word boundaries to avoid partial matches
         for keyword in forbidden_keywords:
-            if f" {keyword} " in upper or upper.startswith(f"{keyword} "):
+            # Pattern matches the keyword as a whole word
+            if re.search(r"\b" + re.escape(keyword) + r"\b", upper):
                 raise ValueError(f"Keyword '{keyword}' is not allowed in queries")
         if ";" in sql_query.strip().strip(";"):
             raise ValueError("Multiple statements or semicolons are not allowed")

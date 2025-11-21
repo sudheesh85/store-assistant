@@ -237,14 +237,26 @@ def _sse_event(payload: Dict[str, Any]) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+from fastapi import APIRouter, Depends
+from app.api.deps import get_current_active_user
+from app.models.user import User
+
+# ... imports ...
+
 @router.post("/question", response_model=AskResponseModel)
-async def ask_question(payload: AskRequestModel) -> AskResponseModel:
+async def ask_question(
+    payload: AskRequestModel,
+    current_user: User = Depends(get_current_active_user),
+) -> AskResponseModel:
     """Handle non-streaming NLQ requests (compatibility endpoint for frontend)."""
     return _process_question(payload)
 
 
 @router.post("/question/stream")
-async def ask_question_stream(payload: AskRequestModel) -> StreamingResponse:
+async def ask_question_stream(
+    payload: AskRequestModel,
+    current_user: User = Depends(get_current_active_user),
+) -> StreamingResponse:
     """Stream NLQ responses using Server-Sent Events."""
 
     async def event_generator() -> AsyncIterator[str]:
