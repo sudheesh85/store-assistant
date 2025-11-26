@@ -1,7 +1,7 @@
 'use client';
 
 import { ChatMessage as MessageType } from '@/types';
-import { User, Bot, Copy, Check, Eye, EyeOff } from 'lucide-react';
+import { User, Bot, Copy, Check, Eye, EyeOff, Volume2, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -21,6 +21,8 @@ interface ChatMessageProps {
 export default function ChatMessage({ message }: ChatMessageProps) {
   const [showSQL, setShowSQL] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
   const isUser = message.role === 'user';
 
   const handleCopySQL = () => {
@@ -31,24 +33,54 @@ export default function ChatMessage({ message }: ChatMessageProps) {
     }
   };
 
+  const handlePlayAudio = async () => {
+    if (isPlaying) return;
+
+    setIsLoadingAudio(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1'}/audio/speak?text=${encodeURIComponent(message.content)}`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
+
+      if (!response.ok) throw new Error('TTS failed');
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+      };
+
+      audio.play();
+      setIsPlaying(true);
+    } catch (error) {
+      console.error('Audio playback error:', error);
+      alert('Failed to play audio');
+    } finally {
+      setIsLoadingAudio(false);
+    }
+  };
+
   return (
     <div className={`flex gap-4 mb-6 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
-      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-        isUser 
-          ? 'bg-primary-600 text-white' 
-          : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-      }`}>
+      <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isUser
+        ? 'bg-primary-600 text-white'
+        : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+        }`}>
         {isUser ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
       </div>
 
       {/* Message Content */}
       <div className={`flex-1 max-w-3xl ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
-        <div className={`rounded-2xl px-4 py-3 ${
-          isUser
-            ? 'bg-primary-600 text-white rounded-br-sm'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-sm'
-        }`}>
+        <div className={`rounded-2xl px-4 py-3 ${isUser
+          ? 'bg-primary-600 text-white rounded-br-sm'
+          : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-sm'
+          }`}>
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
@@ -123,8 +155,8 @@ export default function ChatMessage({ message }: ChatMessageProps) {
                     <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
                       <SyntaxHighlighter
                         language="sql"
-                        customStyle={{ 
-                          margin: 0, 
+                        customStyle={{
+                          margin: 0,
                           background: 'transparent',
                           color: '#d4d4d4',
                           fontSize: '14px',
@@ -145,7 +177,7 @@ export default function ChatMessage({ message }: ChatMessageProps) {
                   {message.data.showing_preview && (
                     <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                       <p className="text-sm text-blue-700 dark:text-blue-300">
-                        📊 Showing first {message.data.rows.length} of {message.data.total_rows} rows. 
+                        📊 Showing first {message.data.rows.length} of {message.data.total_rows} rows.
                         <span className="font-medium"> Use "Download CSV" button to get full data.</span>
                       </p>
                     </div>
@@ -160,10 +192,26 @@ export default function ChatMessage({ message }: ChatMessageProps) {
           )}
         </div>
 
-        {/* Timestamp */}
-        <span className={`text-xs text-gray-500 dark:text-gray-400 ${isUser ? 'text-right' : 'text-left'}`}>
-          {format(message.timestamp, 'h:mm a')}
-        </span>
+        {/* Timestamp & Actions */}
+        <div className={`flex items-center gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {format(message.timestamp, 'h:mm a')}
+          </span>
+          {!isUser && message.content && (
+            <button
+              onClick={handlePlayAudio}
+              disabled={isLoadingAudio || isPlaying}
+              className="p-1 text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
+              title="Read aloud"
+            >
+              {isLoadingAudio ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Volume2 className={`w-3 h-3 ${isPlaying ? 'text-primary-600 dark:text-primary-400' : ''}`} />
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

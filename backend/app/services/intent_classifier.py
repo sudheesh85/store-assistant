@@ -44,9 +44,9 @@ class IntentClassifier:
 QUESTION: {question}
 
 Is this a:
-A) DATA QUERY - user wants to see/fetch NEW data (show, list, get, how many, what are, top, total, who is, which)
-B) INSIGHT/ADVICE - user wants recommendations/analysis (how to improve, what should I do, suggestions, advice, why, strategy)
-C) REFORMAT - user wants previous answer reformatted/translated (in malayalam, translate, explain, tell me in, give me in, can you give)
+A) DATA QUERY - user wants to see/fetch NEW data (show, list, get, how many, what are, top, total, who is, which). Malayalam: എത്ര (how many), ആരാണ് (who is), ലിസ്റ്റ് (list), കാണിക്കൂ (show).
+B) INSIGHT/ADVICE - user wants recommendations/analysis (how to improve, what should I do, suggestions, advice, why, strategy). Malayalam: എങ്ങനെ മെച്ചപ്പെടുത്താം (how to improve), എന്ത് ചെയ്യണം (what to do).
+C) REFORMAT - user wants previous answer reformatted/translated (in malayalam, translate, explain, tell me in, give me in, can you give).
 
 Respond with ONLY ONE WORD:
 - "data_query" (if asking for NEW data or specific information)

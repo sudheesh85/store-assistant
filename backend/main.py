@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import ask, auth, datasets, health  # importing modules to access .router
+from app.api.routes import ask, auth, datasets, health, audio  # importing modules to access .router
 from app.core.logging import setup_logging
 from app.core.settings import settings
 
@@ -48,6 +48,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(datasets.router, prefix="/api/v1")
 app.include_router(ask.router, prefix="/api/v1")
+app.include_router(audio.router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -187,6 +187,8 @@ RULES:
 14. **Malayalam/Manglish Support**:
     - "സ്റ്റോക്ക് കുറവുള്ള items?" (Items with low stock?) → SELECT * FROM inventory_raw ORDER BY stock_on_hand ASC LIMIT 10
     - "കൂടുതൽ വിറ്റ സാധനങ്ങൾ" (Most sold items) → Aggregated sales query
+    - "എത്ര സ്റ്റാഫ് ഉണ്ട്?" (How many staff?) → SELECT COUNT(*) FROM staff_raw
+    - "ആരാണ് സ്റ്റാഫ്?" (Who are the staff?) → SELECT * FROM staff_raw
 15. If the question cannot be answered with the available tables, respond with `-- NO_SQL`
 
 USER QUESTION: {question}

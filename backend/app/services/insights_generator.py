@@ -157,24 +157,25 @@ NOT: "To improve performance, implement structured training programs and analyze
 
 Respond naturally in Malayalam or English (match their question language)."""
         else:
-            prompt = f"""You are a helpful virtual assistant for a Kerala retail store manager. They're asking for advice.
+            prompt = f"""You are a helpful virtual assistant for a Kerala retail store manager.
 
-THEIR QUESTION: {question}
+THEIR INPUT: {question}
 
 {data_context}
 
-RESPOND AS A HELPFUL COLLEAGUE:
-- Be conversational and friendly
-- Keep it SHORT (3-4 quick tips)
-- Give PRACTICAL advice they can act on immediately
-- Use simple language
-- Suggest checking specific data first: "Let me first check..." or "Let's look at..."
-- Be encouraging
+INSTRUCTIONS:
+1. **If the user is asking for advice/insights/performance**:
+   - **CRITICAL**: You MUST use the numbers provided in the "RECENT QUERY RESULTS" or "Overall Store Performance Summary" above.
+   - Start by summarizing the current status (e.g., "Total revenue is ₹X with Y transactions").
+   - Mention top selling items if available.
+   - Give PRACTICAL advice based on these specific numbers.
+   - Keep it SHORT (3-4 sentences).
 
-Example: "Good question! Let's check a few things. First, let's see how [product] has been selling this month. Then..."
-NOT: "To analyze this, you should run the following queries: 1. Sales trends 2. Inventory levels..."
+2. **If the user is just greeting, thanking, or making small talk**:
+   - Respond politely and warmly.
+   - Just say "You're welcome!", "Happy to help!", or introduce yourself.
 
-Respond naturally in Malayalam or English (match their question language)."""
+3. **Language**: Respond naturally in Malayalam or English (match their language)."""
 
         return prompt
 
@@ -273,56 +274,139 @@ Respond naturally in Malayalam or English (match their question language)."""
             common_words = {'Previous', 'Context', 'Current', 'Question', 'The', 'How', 'Can', 'We', 'I', 'You'}
             potential_names = [name for name in potential_names if name not in common_words and len(name) > 2]
             
-            if not potential_names:
-                return None
-            
-            # Check if we have staff data
-            staff_dataset = next((ds for ds in datasets if ds.dataset_type == "staff"), None)
             sales_dataset = next((ds for ds in datasets if ds.dataset_type == "sales"), None)
+            staff_dataset = next((ds for ds in datasets if ds.dataset_type == "staff"), None)
+
+            # 1. Try to find specific staff member
+            if potential_names and staff_dataset:
+                for name in potential_names:
+                    if len(name) < 3: continue
+                    
+                    sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name LIKE :name_pattern LIMIT 1"
+                    try:
+                        staff_result = query_executor.execute(store_id, sql, {"name_pattern": f"%{name}%"})
+                        if staff_result and staff_result["rows"]:
+                            staff_row = dict(zip(staff_result["columns"], staff_result["rows"][0]))
+                            staff_id = staff_row.get("staff_id")
+                            
+                            if staff_id and sales_dataset:
+                                sales_sql = f"""
+                                SELECT 
+                                    COUNT(*) as total_sales,
+                                    SUM(total_price) as total_revenue,
+                                    AVG(total_price) as avg_transaction
+                                FROM {sales_dataset.table_name}
+                                WHERE staff_id = :staff_id
+                                """
+                                sales_result = query_executor.execute(store_id, sales_sql, {"staff_id": staff_id})
+                                
+                                combined_data = {
+                                    "columns": staff_result["columns"] + sales_result["columns"],
+                                    "rows": [staff_result["rows"][0] + sales_result["rows"][0]],
+                                    "context": f"Performance data for {name}"
+                                }
+                                logger.info("Fetched data for entity: %s", name)
+                                return combined_data
+                    except Exception as e:
+                        logger.debug("Failed to fetch data for %s: %s", name, e)
+                        continue
+
+            # 2. If no specific person found, check for general store performance keywords
+            # English and Malayalam keywords for performance/sales/improvement
+            perf_keywords = [
+                "performance", "improve", "sales", "revenue", "profit", "turnover", "report", "status",
+                "പെർഫോമൻസ്", "മെച്ചപ്പെടുത്താൻ", "വിറ്റുവരവ്", "ലാഭം", "കച്ചവടം", "എങ്ങനെ", "റിപ്പോർട്ട്", "അവസ്ഥ", "മൊത്തം"
+            ]
             
-            if not staff_dataset:
-                return None
+            # Check for keyword match
+            matched_keywords = [k for k in perf_keywords if k in question.lower()]
             
-            # Try to find the mentioned person in staff data
-            for name in potential_names:
-                if len(name) < 3:  # Skip short words
-                    continue
+            # Handle follow-up questions about improvement (e.g., "how to improve this")
+            # If the question is short and asks about improvement, assume it refers to store performance
+            is_improvement_followup = any(k in question.lower() for k in ["improve", "മെച്ചപ്പെടുത്താൻ", "എങ്ങനെ"]) and len(question.split()) < 10
+            
+            if matched_keywords or is_improvement_followup:
+                if matched_keywords:
+                    logger.info("Matched performance keywords: %s", matched_keywords)
+                else:
+                    logger.info("Detected improvement follow-up question.")
                 
-                # Query staff data for this person
-                # Use parameterized query for safety
-                sql = f"SELECT * FROM {staff_dataset.table_name} WHERE name LIKE :name_pattern LIMIT 1"
-                try:
-                    staff_result = query_executor.execute(store_id, sql, {"name_pattern": f"%{name}%"})
-                    if staff_result and staff_result["rows"]:
-                        # Found the person! Now get their sales performance
-                        staff_row = dict(zip(staff_result["columns"], staff_result["rows"][0]))
-                        staff_id = staff_row.get("staff_id")
+                if sales_dataset:
+                    logger.info("Fetching store summary for insights.")
+                    try:
+                        # Determine date column dynamically
+                        date_col = "date"
+                        columns = [c.name for c in sales_dataset.columns]
+                        if "sale_date" in columns:
+                            date_col = "sale_date"
+                        elif "invoice_date" in columns:
+                            date_col = "invoice_date"
                         
-                        if staff_id and sales_dataset:
-                            # Get sales performance for this staff member
-                            sales_sql = f"""
-                            SELECT 
-                                COUNT(*) as total_sales,
-                                SUM(total_price) as total_revenue,
-                                AVG(total_price) as avg_transaction
-                            FROM {sales_dataset.table_name}
-                            WHERE staff_id = :staff_id
-                            """
-                            sales_result = query_executor.execute(store_id, sales_sql, {"staff_id": staff_id})
+                        # Fetch overall summary: Total Sales, Revenue, and Top 3 Items
+                        summary_sql = f"""
+                        SELECT 
+                            COUNT(*) as total_transactions,
+                            SUM(total_price) as total_revenue,
+                            AVG(total_price) as avg_ticket_value,
+                            MIN({date_col}) as first_sale,
+                            MAX({date_col}) as last_sale
+                        FROM {sales_dataset.table_name}
+                        """
+                        summary_res = query_executor.execute(store_id, summary_sql)
+                    
+                        # Determine product name column dynamically
+                        product_col = "item_name"
+                        columns = [c.name for c in sales_dataset.columns]
+                        if "product_name" in columns:
+                            product_col = "product_name"
+                        elif "item" in columns:
+                            product_col = "item"
+                        
+                        top_items_sql = f"""
+                        SELECT {product_col}, SUM(quantity) as qty, SUM(total_price) as rev 
+                        FROM {sales_dataset.table_name} 
+                        GROUP BY {product_col} 
+                        ORDER BY rev DESC 
+                        LIMIT 5
+                        """
+                        top_items_res = query_executor.execute(store_id, top_items_sql)
+                        
+                        if summary_res and summary_res["rows"]:
+                            summ_row = summary_res["rows"][0]
+                            summ_cols = summary_res["columns"]
                             
-                            # Combine staff info with sales performance
-                            combined_data = {
-                                "columns": staff_result["columns"] + sales_result["columns"],
-                                "rows": [staff_result["rows"][0] + sales_result["rows"][0]],
-                                "context": f"Performance data for {name}"
+                            # Format top items nicely for the context
+                            top_items_list = []
+                            if top_items_res and top_items_res["rows"]:
+                                for r in top_items_res["rows"]:
+                                    top_items_list.append(f"{r[0]} (Qty: {r[1]}, Rev: ₹{r[2]:,.2f})")
+                            top_items_str = " | ".join(top_items_list) if top_items_list else "N/A"
+                            
+                            # Create a rich context object
+                            return {
+                                "columns": summ_cols + ["top_selling_products_summary"],
+                                "rows": [summ_row + [top_items_str]],
+                                "context": "Overall Store Performance Summary (Use this to answer 'how is the store doing')"
                             }
-                            
-                            logger.info("Fetched data for entity: %s", name)
-                            return combined_data
+                    except Exception as e:
+                        logger.error("Failed to fetch store summary: %s", e)
+
+            # 3. Check for "how many staff" specific questions (fallback if intent classifier missed it)
+            staff_keywords = ["how many staff", "staff count", "employees", "എത്ര സ്റ്റാഫ്", "ജീവനക്കാർ"]
+            if staff_dataset and any(k in question.lower() for k in staff_keywords):
+                logger.info("Detected staff count question in insights generator.")
+                try:
+                    count_sql = f"SELECT COUNT(*) as staff_count FROM {staff_dataset.table_name}"
+                    count_res = query_executor.execute(store_id, count_sql)
+                    if count_res and count_res["rows"]:
+                        return {
+                            "columns": count_res["columns"],
+                            "rows": count_res["rows"],
+                            "context": "Staff Count"
+                        }
                 except Exception as e:
-                    logger.debug("Failed to fetch data for %s: %s", name, e)
-                    continue
-            
+                    logger.error("Failed to fetch staff count: %s", e)
+
             return None
         except Exception as exc:
             logger.warning("Error fetching relevant data: %s", exc)

@@ -1,9 +1,100 @@
 'use client';
 
 import { useState, KeyboardEvent, useRef, useEffect } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, Mic, Square } from 'lucide-react';
 import { QueryExample } from '@/types';
 import { queryExamples } from '@/lib/queryExamples';
+import { apiClient } from '@/lib/api';
+
+interface VoiceInputProps {
+  onTranscript: (text: string) => void;
+  disabled?: boolean;
+}
+
+function VoiceInput({ onTranscript, disabled }: VoiceInputProps) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [language, setLanguage] = useState<'ml-IN' | 'en-US'>('ml-IN');
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+    }
+  }, []);
+
+  const startRecording = () => {
+    if (!recognitionRef.current) {
+      alert('Speech recognition is not supported in this browser. Please use Chrome.');
+      return;
+    }
+
+    recognitionRef.current.lang = language;
+
+    recognitionRef.current.onstart = () => {
+      setIsRecording(true);
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      onTranscript(transcript);
+    };
+
+    recognitionRef.current.onerror = (event: any) => {
+      console.error('Speech recognition error', event.error);
+      setIsRecording(false);
+    };
+
+    recognitionRef.current.start();
+  };
+
+  const stopRecording = () => {
+    if (recognitionRef.current && isRecording) {
+      recognitionRef.current.stop();
+    }
+  };
+
+  const toggleLanguage = () => {
+    setLanguage(prev => prev === 'ml-IN' ? 'en-US' : 'ml-IN');
+  };
+
+  if (typeof window !== 'undefined' && !('webkitSpeechRecognition' in window)) {
+    return null; // Hide if not supported
+  }
+
+  return (
+    <div className="flex flex-col gap-1 items-center">
+      <button
+        onClick={isRecording ? stopRecording : startRecording}
+        disabled={disabled}
+        className={`flex-shrink-0 w-12 h-12 rounded-lg transition-colors flex items-center justify-center ${isRecording
+            ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse'
+            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+        title={`Start voice input (${language === 'ml-IN' ? 'Malayalam' : 'English'})`}
+      >
+        {isRecording ? (
+          <Square className="w-5 h-5" />
+        ) : (
+          <Mic className="w-5 h-5" />
+        )}
+      </button>
+      <button
+        onClick={toggleLanguage}
+        className="text-[10px] font-medium text-gray-500 hover:text-primary-600 uppercase tracking-wider"
+        title="Switch Language"
+      >
+        {language === 'ml-IN' ? 'MAL' : 'ENG'}
+      </button>
+    </div>
+  );
+}
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -115,6 +206,9 @@ export default function ChatInput({
               <Send className="w-5 h-5" />
             )}
           </button>
+
+          {/* Voice Input Button */}
+          <VoiceInput onTranscript={(text) => setInput(text)} disabled={isLoading || disabled} />
         </div>
         <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
           Press Enter to send, Shift+Enter for new line
