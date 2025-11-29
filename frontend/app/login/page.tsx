@@ -59,7 +59,8 @@ export default function LoginPage() {
         payload.name = name.trim();
       }
 
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || 'https://store-backend-ai.azurewebsites.net/api/v1';
+      const response = await fetch(`${baseURL.replace('/api/v1', '')}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -108,22 +109,20 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setLoginType('email')}
-              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                loginType === 'email'
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${loginType === 'email'
                   ? 'bg-white dark:bg-gray-600 text-purple-600 dark:text-purple-400 shadow-sm'
                   : 'text-gray-600 dark:text-gray-400'
-              }`}
+                }`}
             >
               Email
             </button>
             <button
               type="button"
               onClick={() => setLoginType('mobile')}
-              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                loginType === 'mobile'
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${loginType === 'mobile'
                   ? 'bg-white dark:bg-gray-600 text-purple-600 dark:text-purple-400 shadow-sm'
                   : 'text-gray-600 dark:text-gray-400'
-              }`}
+                }`}
             >
               Mobile
             </button>

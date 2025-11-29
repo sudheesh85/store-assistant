@@ -13,9 +13,9 @@ class APIClient {
   private streamingURL: string;
 
   constructor() {
-    this.baseURL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'https://store-backend-ai.azurewebsites.net/api/v1';
     this.streamingURL = process.env.NEXT_PUBLIC_API_STREAMING_URL || `${this.baseURL}/ask/question/stream`;
-    
+
     this.client = axios.create({
       baseURL: this.baseURL,
       headers: {
@@ -162,9 +162,9 @@ class APIClient {
                   data:
                     metaColumns && metaRows
                       ? {
-                          columns: metaColumns,
-                          rows: metaRows,
-                        }
+                        columns: metaColumns,
+                        rows: metaRows,
+                      }
                       : undefined,
                   visualization: metaVisualization,
                 });
@@ -175,7 +175,7 @@ class APIClient {
                 completed = true;
                 throw new Error(
                   event.message ||
-                    'The assistant could not find relevant information for this question.'
+                  'The assistant could not find relevant information for this question.'
                 );
               }
               default:
@@ -202,9 +202,9 @@ class APIClient {
           data:
             metaColumns && metaRows
               ? {
-                  columns: metaColumns,
-                  rows: metaRows,
-                }
+                columns: metaColumns,
+                rows: metaRows,
+              }
               : undefined,
           visualization: metaVisualization,
         });
